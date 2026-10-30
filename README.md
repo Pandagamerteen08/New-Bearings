@@ -14,7 +14,7 @@ Learning is hard for reasons that have nothing to do with intelligence: memory, 
 
 Recall is currently a design document and a repository skeleton. The graphical interface framework has not been selected, so no source directories contain application code. This README describes the intended application; it is not a description of features you can install today.
 
-The authoritative design document is [docs/APP_DESIGN_DOCUMENT.txt](docs/APP_DESIGN_DOCUMENT.txt).
+The authoritative design document is [docs/APP_DESIGN_DOCUMENT.txt](docs/APP_DESIGN_DOCUMENT.md).
 
 ---
 
