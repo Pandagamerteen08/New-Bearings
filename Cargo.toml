@@ -1,0 +1,16 @@
+[package]
+name = "recall"
+version = "0.1.0"
+edition = "2024"
+description = "A cross-platform, accessible learning companion"
+license = "MIT"
+repository = ""
+publish = false
+
+[[bin]]
+name = "recall"
+path = "src/main.rs"
+
+[dependencies]
+
+[dev-dependencies]
