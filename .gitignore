@@ -1,0 +1,49 @@
+# Build output
+/target/
+/build/
+/installers/
+**/*.rs.bk
+*.pdb
+*.dSYM/
+*.exe
+*.msi
+*.msix
+*.dmg
+*.pkg
+*.AppImage
+*.deb
+*.rpm
+
+# Web frontend output (only relevant if a web-based GUI framework such as Tauri is chosen)
+node_modules/
+dist/
+dist-ssr/
+.pnpm-store/
+
+# Local user data — learning progress must never be committed
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+/data/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Tooling
+.freebuff/
