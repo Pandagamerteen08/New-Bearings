@@ -35,8 +35,8 @@ dist-ssr/
 
 # Editors
 .vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
+.vscode/extensions.json
+.vscode/settings.json
 .idea/
 *.swp
 
@@ -44,6 +44,3 @@ dist-ssr/
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Tooling
-.freebuff/
