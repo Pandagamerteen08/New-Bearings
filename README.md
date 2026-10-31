@@ -26,6 +26,7 @@ The project is in active early development. This README describes the product vi
 
 ## Table of Contents
 
+<<<<<<< HEAD
 - [1. Project Status](#1-project-status)
 - [2. Quick Overview](#2-quick-overview)
 - [3. Why New Bearings Exists](#3-why-new-bearings-exists)
@@ -80,6 +81,13 @@ The project is in active early development. This README describes the product vi
 - [52. Release Readiness](#52-release-readiness)
 - [53. Long-Term Vision](#53-long-term-vision)
 - [54. Final Project Principles](#54-final-project-principles)
+=======
+**Early design and technical validation. There is no runnable build yet.**
+
+Recall is currently a design document and a repository skeleton. The graphical interface framework has not been selected, so no source directories contain application code. This README describes the intended application; it is not a description of features you can install today.
+
+The authoritative design document is [docs/APP_DESIGN_DOCUMENT.md](docs/APP_DESIGN_DOCUMENT.md).
+>>>>>>> 4107a34c1e701bedd32b303a98cf8d078b6f8b00
 
 ---
 
