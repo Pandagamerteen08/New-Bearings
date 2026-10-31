@@ -27,6 +27,7 @@ The project is in active early development. This README describes the product vi
 ## Table of Contents
 
 <<<<<<< HEAD
+
 - [1. Project Status](#1-project-status)
 - [2. Quick Overview](#2-quick-overview)
 - [3. Why New Bearings Exists](#3-why-new-bearings-exists)
