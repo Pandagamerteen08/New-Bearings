@@ -26,8 +26,6 @@ The project is in active early development. This README describes the product vi
 
 ## Table of Contents
 
-<<<<<<< HEAD
-
 - [1. Project Status](#1-project-status)
 - [2. Quick Overview](#2-quick-overview)
 - [3. Why New Bearings Exists](#3-why-new-bearings-exists)
@@ -82,125 +80,37 @@ The project is in active early development. This README describes the product vi
 - [52. Release Readiness](#52-release-readiness)
 - [53. Long-Term Vision](#53-long-term-vision)
 - [54. Final Project Principles](#54-final-project-principles)
-=======
-**Early design and technical validation. There is no runnable build yet.**
-
-Recall is currently a design document and a repository skeleton. The graphical interface framework has not been selected, so no source directories contain application code. This README describes the intended application; it is not a description of features you can install today.
-
-The authoritative design document is [docs/APP_DESIGN_DOCUMENT.md](docs/APP_DESIGN_DOCUMENT.md).
->>>>>>> 4107a34c1e701bedd32b303a98cf8d078b6f8b00
 
 ---
 
 ## 1. Project Status
 
-New Bearings is an early-stage software project.
+**Early design and technical validation. There is no runnable build yet.**
 
-The current priority is to establish a maintainable application foundation and develop the project incrementally.
+Recall is currently a design document and a repository skeleton. The graphical interface framework has not been selected, so no source directories contain application code. This README describes the intended application; it is not a description of features you can install today.
 
-The existence of a source file does not automatically mean the corresponding feature is complete.
-
-The existence of a module does not automatically mean its intended behavior is fully implemented.
-
-A documented goal does not automatically mean that the application can perform that goal today.
-
-A successful compilation does not automatically mean that every feature behaves correctly.
-
-A successful test run does not automatically establish compatibility with every platform or environment.
-
-For these reasons, project status should be reported precisely.
-
-### 1.1 Current development position
-
-- The application is being developed in Rust.
-- Windows is the initial development platform.
-- Cross-platform compatibility is a long-term objective.
-- Programming education is the initial subject focus.
-- The broader product vision includes other learning subjects.
-- The application is intended to support different learning preferences.
-- Accessibility is a design priority.
-- Personalization should remain optional and user-controlled.
-- The project is not intended to diagnose medical or learning conditions.
-- The project is not a substitute for professional educational support.
-- The codebase contains distinct application modules.
-- The repository includes development and project documentation.
-- The repository includes a continuous integration workflow.
-- The project is intended to remain maintainable as it grows.
-- The public application name remains provisional.
-- A stable public release has not been established by this README.
-
-### 1.2 Feature status terminology
-
-Use the following terminology when discussing project capabilities.
-
-| Status | Meaning |
-| --- | --- |
-| Implemented | The feature exists and its expected behavior has been verified to an appropriate standard. |
-| Partially implemented | Some behavior exists, but important functionality or verification remains incomplete. |
-| In progress | Development is actively underway. |
-| Planned | The feature is part of the intended direction but has not been completed. |
-| Proposed | The feature is being considered and is not yet an approved commitment. |
-| Blocked | A dependency, unresolved decision, or technical problem prevents progress. |
-| Unsupported | The project intentionally does not provide the capability in the relevant context. |
-| Deprecated | The capability remains present temporarily but is scheduled for removal or replacement. |
-
-These terms should be used consistently across documentation, issue discussions, release notes, and feature tracking.
-
-### 1.3 What this README promises
-
-This document explains the project's direction and development expectations.
-
-It does not promise that every proposed feature is available.
-
-It does not promise that every listed programming language already has a complete learning environment.
-
-It does not promise that the application has passed a formal accessibility audit.
-
-It does not promise that every platform has been tested.
-
-It does not promise that user data has undergone a formal security audit.
-
-It does not establish a legal guarantee of compatibility with every third-party library.
-
-It does not replace the technical documentation for a specific implementation.
-
-The authoritative state of a capability must be determined from the current code, its tests, and verified behavior.
-
-### 1.4 Why accuracy matters
-
-Educational software influences how people spend their time and how they judge their own progress.
-
-Incorrect claims about learning results can mislead users.
-
-Incorrect claims about privacy can create misplaced confidence.
-
-Incorrect claims about accessibility can exclude the people the software intends to help.
-
-Incorrect installation instructions can waste development time.
-
-Incorrect compatibility claims can lead users to depend on unsupported configurations.
-
-New Bearings should favor accurate, qualified explanations over impressive but unverified promises.
-
-**Related documentation:** [Architecture](docs/ARCHITECTURE.md), [Roadmap](docs/ROADMAP.md), [Testing](docs/TESTING.md), [Release Plan](docs/RELEASE_PLAN.md).
-
-[Back to top](#new-bearings)
+The authoritative design document is [docs/APP_DESIGN_DOCUMENT.txt](docs/APP_DESIGN_DOCUMENT.md).
 
 ---
 
 ## 2. Quick Overview
 
-New Bearings is intended to help people learn, practice, and retain knowledge through a flexible digital learning environment.
+### Why Recall exists
 
-Its initial focus is programming.
+Most learning tools assume you either already know how to learn, or that you will pay, or that you will not fall behind. Recall is designed around the opposite assumptions:
 
-Its long-term direction is broader than a single programming language or educational subject.
+- **A forgotten concept is a scheduling problem, not a failure.**
+- **Explanation depth should adapt to the person, not the topic.**
+- **Accessibility is part of the design, not a settings screen bolted on at the end.**
+- **Nobody should have to disclose a diagnosis to get a learning experience that fits them.**
 
-The application should help learners understand material rather than merely complete a sequence of activities.
+Recall asks about preferences, never about medical conditions. Every question it asks can be skipped, and every answer can be changed later.
 
-### 2.1 At a glance
+---
 
-| Category | Direction |
+### Planned features (initial release)
+
+| Area | What it will do |
 | --- | --- |
 | Project name | New Bearings, provisional |
 | Primary implementation language | Rust |
