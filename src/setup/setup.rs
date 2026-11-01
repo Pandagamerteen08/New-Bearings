@@ -3,16 +3,19 @@
 //! Rust owns the setup stage so the same transition rules apply no matter how
 //! the interface changes. The interface only renders the snapshot it receives.
 
-use std::sync::Mutex;
+use serde::{Deserialize, Serialize};
 
-use serde::Serialize;
-
-/// Identifies the current stage of the initial application setup.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// Identifies the current stage of the application for a learner.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SetupStage {
+    /// The welcome screen, shown before anything else.
+    #[default]
     Welcome,
+    /// The introduction that explains what the application is for.
     Introduction,
+    /// Setup is finished; the learner belongs in the learning screens.
+    Learning,
 }
 
 /// The setup information the interface needs in order to render a screen.
@@ -25,20 +28,19 @@ pub struct SetupSnapshot {
     pub stage: SetupStage,
     pub can_begin: bool,
     pub can_return_to_welcome: bool,
+    pub can_start_learning: bool,
 }
 
 /// Represents the current setup state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SetupState {
     stage: SetupStage,
 }
 
 impl SetupState {
-    /// Creates a new setup state at the welcome stage.
-    pub const fn new() -> Self {
-        Self {
-            stage: SetupStage::Welcome,
-        }
+    /// Recreates a setup state from a stage, such as one read from disk.
+    pub const fn from_stage(stage: SetupStage) -> Self {
+        Self { stage }
     }
 
     /// Returns the current setup stage.
@@ -52,6 +54,7 @@ impl SetupState {
             stage: self.stage(),
             can_begin: matches!(self.stage, SetupStage::Welcome),
             can_return_to_welcome: matches!(self.stage, SetupStage::Introduction),
+            can_start_learning: matches!(self.stage, SetupStage::Introduction),
         }
     }
 
@@ -63,6 +66,7 @@ impl SetupState {
                 Ok(())
             }
             SetupStage::Introduction => Err(SetupError::AlreadyStarted),
+            SetupStage::Learning => Err(SetupError::AlreadyLearning),
         }
     }
 
@@ -74,6 +78,21 @@ impl SetupState {
                 self.stage = SetupStage::Welcome;
                 Ok(())
             }
+            // Setup is finished once learning has begun, so the introduction
+            // is no longer a screen the learner can return to.
+            SetupStage::Learning => Err(SetupError::AlreadyLearning),
+        }
+    }
+
+    /// Leaves the introduction and enters the learning screens.
+    pub fn start_learning(&mut self) -> Result<(), SetupError> {
+        match self.stage {
+            SetupStage::Welcome => Err(SetupError::NotAtIntroduction),
+            SetupStage::Introduction => {
+                self.stage = SetupStage::Learning;
+                Ok(())
+            }
+            SetupStage::Learning => Err(SetupError::AlreadyLearning),
         }
     }
 }
@@ -88,6 +107,8 @@ impl SetupState {
 pub enum SetupError {
     AlreadyStarted,
     AlreadyAtWelcome,
+    AlreadyLearning,
+    NotAtIntroduction,
 }
 
 impl std::fmt::Display for SetupError {
@@ -97,63 +118,17 @@ impl std::fmt::Display for SetupError {
             Self::AlreadyAtWelcome => {
                 formatter.write_str("The initial setup is already at the welcome screen.")
             }
+            Self::AlreadyLearning => {
+                formatter.write_str("Initial setup is finished and learning has begun.")
+            }
+            Self::NotAtIntroduction => {
+                formatter.write_str("Learning can only begin after the introduction.")
+            }
         }
     }
 }
 
 impl std::error::Error for SetupError {}
-
-/// Holds the setup state for the whole application.
-///
-/// Tauri shares one instance of this value with every command, so the stage
-/// survives between invocations instead of resetting on each call.
-#[derive(Debug)]
-pub struct SetupStore {
-    state: Mutex<SetupState>,
-}
-
-impl SetupStore {
-    /// Creates a store that starts at the beginning of the setup flow.
-    pub fn new() -> Self {
-        Self {
-            state: Mutex::new(SetupState::new()),
-        }
-    }
-
-    /// Returns the current snapshot without changing the state.
-    pub fn snapshot(&self) -> SetupSnapshot {
-        self.with_state(|state| state.snapshot())
-    }
-
-    /// Advances the setup and returns the resulting snapshot.
-    pub fn begin(&self) -> Result<SetupSnapshot, SetupError> {
-        self.with_state(|state| {
-            state.begin()?;
-            Ok(state.snapshot())
-        })
-    }
-
-    /// Returns to the welcome screen and returns the resulting snapshot.
-    pub fn return_to_welcome(&self) -> Result<SetupSnapshot, SetupError> {
-        self.with_state(|state| {
-            state.return_to_welcome()?;
-            Ok(state.snapshot())
-        })
-    }
-
-    /// Runs `action` while holding the lock, which is released immediately after.
-    ///
-    /// The state is a plain `Copy` value, so recovering a poisoned lock cannot
-    /// expose a half-written state.
-    fn with_state<T>(&self, action: impl FnOnce(&mut SetupState) -> T) -> T {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        action(&mut state)
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -161,14 +136,14 @@ mod tests {
 
     #[test]
     fn new_setup_starts_at_welcome() {
-        let state = SetupState::new();
+        let state = SetupState::default();
 
         assert_eq!(state.stage(), SetupStage::Welcome);
     }
 
     #[test]
     fn begin_advances_to_introduction() {
-        let mut state = SetupState::new();
+        let mut state = SetupState::default();
 
         assert!(state.begin().is_ok());
         assert_eq!(state.stage(), SetupStage::Introduction);
@@ -176,97 +151,119 @@ mod tests {
 
     #[test]
     fn beginning_twice_returns_an_error() {
-        let mut state = SetupState::new();
+        let mut state = SetupState::default();
 
         assert!(state.begin().is_ok());
         assert_eq!(state.begin(), Err(SetupError::AlreadyStarted));
     }
 
     #[test]
-    fn return_to_welcome_goes_back_to_the_start() {
-        let mut state = SetupState::new();
+    fn beginning_after_learning_returns_an_error() {
+        let mut state = SetupState::default();
 
-        assert!(state.begin().is_ok());
+        state.begin().expect("introduction");
+        state.start_learning().expect("learning");
+
+        assert_eq!(state.begin(), Err(SetupError::AlreadyLearning));
+    }
+
+    #[test]
+    fn return_to_welcome_goes_back_to_the_start() {
+        let mut state = SetupState::default();
+
+        state.begin().expect("introduction");
+
         assert!(state.return_to_welcome().is_ok());
         assert_eq!(state.stage(), SetupStage::Welcome);
     }
 
     #[test]
     fn returning_from_welcome_returns_an_error() {
-        let mut state = SetupState::new();
+        let mut state = SetupState::default();
 
         assert_eq!(state.return_to_welcome(), Err(SetupError::AlreadyAtWelcome));
+    }
+
+    #[test]
+    fn learning_cannot_go_back_to_the_introduction() {
+        let mut state = SetupState::default();
+
+        state.begin().expect("introduction");
+        state.start_learning().expect("learning");
+
+        assert_eq!(state.return_to_welcome(), Err(SetupError::AlreadyLearning));
+    }
+
+    #[test]
+    fn start_learning_requires_the_introduction() {
+        let mut state = SetupState::default();
+
+        assert_eq!(state.start_learning(), Err(SetupError::NotAtIntroduction));
         assert_eq!(state.stage(), SetupStage::Welcome);
+
+        state.begin().expect("introduction");
+        state.start_learning().expect("learning");
+
+        assert_eq!(state.stage(), SetupStage::Learning);
+    }
+
+    #[test]
+    fn starting_learning_twice_returns_an_error() {
+        let mut state = SetupState::default();
+
+        state.begin().expect("introduction");
+        state.start_learning().expect("learning");
+
+        assert_eq!(state.start_learning(), Err(SetupError::AlreadyLearning));
     }
 
     #[test]
     fn rejected_transition_leaves_the_stage_unchanged() {
-        let mut state = SetupState::new();
+        let mut state = SetupState::default();
 
-        assert!(state.begin().is_ok());
-        assert_eq!(state.begin(), Err(SetupError::AlreadyStarted));
-        assert_eq!(state.stage(), SetupStage::Introduction);
+        state.begin().expect("introduction");
+        state.start_learning().expect("learning");
+
+        assert!(state.return_to_welcome().is_err());
+        assert!(state.begin().is_err());
+        assert_eq!(state.stage(), SetupStage::Learning);
     }
 
     #[test]
     fn snapshot_describes_the_welcome_stage() {
-        let snapshot = SetupState::new().snapshot();
+        let snapshot = SetupState::default().snapshot();
 
         assert_eq!(snapshot.stage, SetupStage::Welcome);
         assert!(snapshot.can_begin);
         assert!(!snapshot.can_return_to_welcome);
+        assert!(!snapshot.can_start_learning);
     }
 
     #[test]
     fn snapshot_describes_the_introduction_stage() {
-        let mut state = SetupState::new();
-
-        assert!(state.begin().is_ok());
+        let mut state = SetupState::default();
+        state.begin().expect("introduction");
 
         let snapshot = state.snapshot();
 
         assert_eq!(snapshot.stage, SetupStage::Introduction);
         assert!(!snapshot.can_begin);
         assert!(snapshot.can_return_to_welcome);
+        assert!(snapshot.can_start_learning);
     }
 
     #[test]
-    fn store_keeps_the_stage_between_calls() {
-        let store = SetupStore::new();
+    fn snapshot_describes_the_learning_stage() {
+        let mut state = SetupState::default();
+        state.begin().expect("introduction");
+        state.start_learning().expect("learning");
 
-        let advanced = store.begin().expect("the first begin should succeed");
-        assert_eq!(advanced.stage, SetupStage::Introduction);
+        let snapshot = state.snapshot();
 
-        let unchanged = store.snapshot();
-        assert_eq!(unchanged.stage, SetupStage::Introduction);
-
-        let repeated = store.begin();
-        assert_eq!(repeated, Err(SetupError::AlreadyStarted));
-    }
-
-    #[test]
-    fn store_can_return_to_the_welcome_screen() {
-        let store = SetupStore::new();
-
-        assert!(store.begin().is_ok());
-
-        let restored = store
-            .return_to_welcome()
-            .expect("returning to welcome should succeed");
-
-        assert_eq!(restored.stage, SetupStage::Welcome);
-        assert!(restored.can_begin);
-    }
-
-    #[test]
-    fn setup_stage_serializes_to_a_lowercase_code() {
-        let snapshot = SetupState::new().snapshot();
-        let json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
-
-        assert_eq!(
-            json,
-            r#"{"stage":"welcome","canBegin":true,"canReturnToWelcome":false}"#
-        );
+        assert_eq!(snapshot.stage, SetupStage::Learning);
+        assert!(!snapshot.can_begin);
+        assert!(!snapshot.can_return_to_welcome);
+        assert!(!snapshot.can_start_learning);
     }
 
     #[test]
@@ -275,5 +272,19 @@ mod tests {
             serde_json::to_string(&SetupError::AlreadyStarted).expect("error should serialize");
 
         assert_eq!(json, r#""already_started""#);
+    }
+
+    #[test]
+    fn stages_round_trip_through_serialization() {
+        for stage in [
+            SetupStage::Welcome,
+            SetupStage::Introduction,
+            SetupStage::Learning,
+        ] {
+            let json = serde_json::to_string(&stage).expect("stage should serialize");
+            let restored: SetupStage = serde_json::from_str(&json).expect("stage should parse");
+
+            assert_eq!(restored, stage);
+        }
     }
 }

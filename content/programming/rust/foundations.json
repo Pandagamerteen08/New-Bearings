@@ -1,0 +1,157 @@
+{
+  "formatVersion": 1,
+  "paths": [
+    {
+      "id": "rust-foundations",
+      "title": "Rust Foundations",
+      "summary": "The first steps of Rust: a program that runs, values you can change, and functions that hand work back to you.",
+      "subject": "Programming",
+      "difficulty": "beginner",
+      "lessons": [
+        {
+          "id": "first-program",
+          "title": "Your first Rust program",
+          "summary": "Where execution starts, what a statement is, and why println! has an exclamation mark.",
+          "minutes": 6,
+          "sections": [
+            {
+              "kind": "explanation",
+              "heading": "A program starts at main",
+              "body": "Every Rust binary begins at a function called main. When the program runs, Rust calls main and executes the statements inside it from top to bottom. Nothing outside main runs on its own."
+            },
+            {
+              "kind": "code",
+              "heading": "The smallest useful program",
+              "language": "rust",
+              "code": "fn main() {\n    println!(\"Hello, world!\");\n}"
+            },
+            {
+              "kind": "note",
+              "body": "println! is a macro, which is why it ends with an exclamation mark. A macro can work with your source in ways an ordinary function cannot, such as inserting values into the text it prints."
+            }
+          ],
+          "checks": [
+            {
+              "id": "entry-point",
+              "prompt": "Which function does a Rust binary start in?",
+              "options": ["start()", "main()", "run()", "init()"],
+              "answer": 1,
+              "explanation": "Rust calls main first. The other names have no special meaning to the language."
+            },
+            {
+              "id": "semicolon",
+              "prompt": "What does the semicolon at the end of println!(\"Hello, world!\"); do?",
+              "options": [
+                "It prints the line twice",
+                "It marks the end of the statement",
+                "It ends the program",
+                "It is optional and changes nothing"
+              ],
+              "answer": 1,
+              "explanation": "In Rust a semicolon ends a statement. Leaving it out where a statement is expected is a compile error."
+            }
+          ]
+        },
+        {
+          "id": "variables",
+          "title": "Storing values in variables",
+          "summary": "Bindings, immutability by default, and how Rust works out a type for you.",
+          "minutes": 7,
+          "sections": [
+            {
+              "kind": "explanation",
+              "heading": "Bindings are immutable until you say otherwise",
+              "body": "A let binding gives a name to a value: let score = 10; That binding is immutable by default, so writing score = 11; afterwards is a compile error. Adding mut allows the value to change: let mut score = 10;"
+            },
+            {
+              "kind": "code",
+              "heading": "A binding that changes",
+              "language": "rust",
+              "code": "fn main() {\n    let name = \"Ada\";\n    let mut score = 10;\n    score = score + 5;\n    println!(\"{name} has {score} points\");\n}"
+            },
+            {
+              "kind": "explanation",
+              "heading": "Types are usually inferred",
+              "body": "Nothing above names a type. Rust sees 10 used as a whole number and infers i32, its default integer type. Strings written between double quotes are borrowed text, written &str. You can always write the type yourself when it helps the reader."
+            }
+          ],
+          "checks": [
+            {
+              "id": "mut-binding",
+              "prompt": "Which binding can be given a new value later?",
+              "options": [
+                "let total = 0;",
+                "let mut total = 0;",
+                "const total: i32 = 0;",
+                "let total: i32 = 0;"
+              ],
+              "answer": 1,
+              "explanation": "Only mut allows reassignment. const and a plain let are fixed once created."
+            },
+            {
+              "id": "reassignment-error",
+              "prompt": "Given let count = 3; which line fails to compile?",
+              "options": [
+                "println!(\"{count}\");",
+                "count = 4;",
+                "let next = count + 1;",
+                "println!(\"{}\", count * 2);"
+              ],
+              "answer": 1,
+              "explanation": "count was created without mut, so it cannot be assigned a new value."
+            }
+          ]
+        },
+        {
+          "id": "functions",
+          "title": "Functions that return values",
+          "summary": "Parameters with types, a declared return type, and the final expression that produces the answer.",
+          "minutes": 8,
+          "sections": [
+            {
+              "kind": "explanation",
+              "heading": "A return type is part of the promise",
+              "body": "A function declares what it gives back: fn add(a: i32, b: i32) -> i32 The arrow is followed by the return type. Each parameter needs its type written out, because Rust does not guess across function boundaries."
+            },
+            {
+              "kind": "code",
+              "heading": "The last expression is the result",
+              "language": "rust",
+              "code": "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\nfn main() {\n    let total = add(2, 3);\n    println!(\"2 + 3 = {total}\");\n}"
+            },
+            {
+              "kind": "note",
+              "body": "The body of add ends with a + b and no semicolon. Without the semicolon it is an expression whose value becomes the return value. Adding one turns it into a statement that produces nothing, which no longer matches the declared i32."
+            }
+          ],
+          "checks": [
+            {
+              "id": "return-arrow",
+              "prompt": "In fn add(a: i32, b: i32) -> i32, what does -> i32 declare?",
+              "options": [
+                "The type of the first parameter",
+                "The type of the value the function returns",
+                "A comment about the function",
+                "The number of arguments the function takes"
+              ],
+              "answer": 1,
+              "explanation": "The arrow introduces the return type, so add gives back an i32."
+            },
+            {
+              "id": "final-expression",
+              "prompt": "Why does a + b have no semicolon in fn add?",
+              "options": [
+                "Semicolons are not allowed inside functions",
+                "It must stay the final expression so its value is returned",
+                "It makes the addition faster",
+                "It prints the result to the terminal"
+              ],
+              "answer": 1,
+              "explanation": "The final expression is the return value. A semicolon would discard the value and break the declared return type."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

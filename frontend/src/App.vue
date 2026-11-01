@@ -4,14 +4,18 @@ import { onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { welcomeContent } from '../../content/interface/welcome'
 import { setupContent } from '../../content/interface/setup'
+import { learningContent } from '../../content/interface/learning'
 import {
   beginSetup,
   getSetupState,
   returnToWelcome,
+  startLearning,
   toSetupErrorCode,
   type SetupErrorCode,
   type SetupSnapshot,
 } from './backend/setup'
+import { getLearningState, type LearningSnapshot } from './backend/learning'
+import LearningView from './components/LearningView.vue'
 
 // Rust owns the setup stage. This placeholder mirrors the backend's starting
 // stage so the welcome screen renders before the first snapshot arrives, and
@@ -20,7 +24,14 @@ const setup = ref<SetupSnapshot>({
   stage: 'welcome',
   canBegin: true,
   canReturnToWelcome: false,
+  canStartLearning: false,
 })
+
+// The learning screens are rendered from this snapshot, which Rust builds.
+const learning = ref<LearningSnapshot | null>(null)
+const learningError = ref('')
+const learningErrorDetails = ref('')
+const isLoadingLearning = ref(false)
 
 const appInfo = ref('')
 const backendError = ref('')
@@ -35,6 +46,10 @@ function setupErrorMessage(code: SetupErrorCode | null): string | null {
       return setupContent.errorAlreadyStarted
     case 'already_at_welcome':
       return setupContent.errorAlreadyAtWelcome
+    case 'already_learning':
+      return setupContent.errorAlreadyLearning
+    case 'not_at_introduction':
+      return setupContent.errorNotAtIntroduction
     default:
       return null
   }
@@ -55,12 +70,58 @@ async function loadAppInfo() {
   }
 }
 
+async function loadLearningState() {
+  isLoadingLearning.value = true
+  learningError.value = ''
+  learningErrorDetails.value = ''
+
+  try {
+    learning.value = await getLearningState()
+  } catch (error) {
+    learningError.value = learningContent.errorLearningUnavailable
+    learningErrorDetails.value = String(error)
+  } finally {
+    isLoadingLearning.value = false
+  }
+}
+
 async function loadSetupState() {
   try {
     setup.value = await getSetupState()
+
+    // Rust decides whether onboarding is finished; a returning learner goes
+    // straight to the learning screens.
+    if (setup.value.stage === 'learning') {
+      await loadLearningState()
+    }
   } catch (error) {
     showSetupError(error, setupContent.errorUnavailable)
   }
+}
+
+async function enterLearning() {
+  if (isTransitioning.value) {
+    return
+  }
+
+  isTransitioning.value = true
+  setupError.value = ''
+  setupErrorDetails.value = ''
+
+  try {
+    setup.value = await startLearning()
+    await loadLearningState()
+  } catch (error) {
+    showSetupError(error, setupContent.errorUnexpected)
+  } finally {
+    isTransitioning.value = false
+  }
+}
+
+function updateLearning(snapshot: LearningSnapshot) {
+  learning.value = snapshot
+  learningError.value = ''
+  learningErrorDetails.value = ''
 }
 
 async function runSetupCommand(
@@ -147,7 +208,7 @@ onMounted(() => {
       </p>
     </section>
 
-    <section v-else class="hero">
+    <section v-else-if="setup.stage === 'introduction'" class="hero">
       <div class="eyebrow">
         <span class="status-dot"></span>
         {{ welcomeContent.nextEyebrow }}
@@ -162,16 +223,47 @@ onMounted(() => {
         {{ welcomeContent.nextDescription }}
       </p>
 
-      <button
-        class="secondary-button"
-        :disabled="isTransitioning || !setup.canReturnToWelcome"
-        :aria-busy="isTransitioning"
-        @click="goBackToWelcome"
-      >
-        <span aria-hidden="true">←</span>
-        {{ welcomeContent.backButton }}
-      </button>
+      <div class="button-row">
+        <button
+          class="primary-button"
+          :disabled="isTransitioning || !setup.canStartLearning"
+          :aria-busy="isTransitioning"
+          @click="enterLearning"
+        >
+          {{ learningContent.startLearningButton }}
+          <span aria-hidden="true">→</span>
+        </button>
+
+        <button
+          class="secondary-button"
+          :disabled="isTransitioning || !setup.canReturnToWelcome"
+          @click="goBackToWelcome"
+        >
+          <span aria-hidden="true">←</span>
+          {{ welcomeContent.backButton }}
+        </button>
+      </div>
     </section>
+
+    <div v-else class="learning-shell">
+      <p v-if="isLoadingLearning" class="learning-status" role="status">
+        {{ learningContent.loadingLabel }}
+      </p>
+
+      <div v-else-if="learningError" class="setup-error" role="alert">
+        <p>{{ learningError }}</p>
+        <details class="error-details">
+          <summary>{{ learningContent.errorDetailsLabel }}</summary>
+          <pre>{{ learningErrorDetails }}</pre>
+        </details>
+      </div>
+
+      <LearningView
+        v-else-if="learning"
+        :snapshot="learning"
+        @snapshot="updateLearning"
+      />
+    </div>
 
     <footer class="footer">
       <span>{{ welcomeContent.footerMessage }}</span>
@@ -410,6 +502,26 @@ h1 {
   margin-top: 20px;
   color: #777b90;
   font-size: 12px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.learning-shell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.learning-status {
+  margin: 0;
+  color: #a6a9bb;
+  font-size: 14px;
 }
 
 .setup-error {

@@ -1,5 +1,11 @@
+//! Application identity and application-level coordination.
+
 pub const APP_NAME: &str = "New Bearings";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+mod session;
+
+pub use session::{AnswerOutcome, Session};
 
 #[cfg(test)]
 mod tests {
