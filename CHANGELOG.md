@@ -26,14 +26,43 @@ discussed or its implementation has begun.
 
 - Established this changelog as the location for recording project changes.
 - Documented the project's intended change-reporting structure.
+- Onboarding now continues into the learning screens: the setup stage gained a
+  `learning` stage with `start_learning`, and the stage is remembered between
+  runs.
+- A learning catalog in Rust (`src/learning`), with paths, lessons, three kinds of
+  lesson block and multiple-choice knowledge checks.
+- The first real learning content: the `rust-foundations` path, three lessons and
+  six knowledge checks, in `content/programming/rust/foundations.json`.
+- Content validation that reports every problem with its location, plus tests
+  that assert the bundled content is valid.
+- Answer judging in Rust. Correct answers are never serialized to the interface,
+  and a test asserts the answer key cannot leak.
+- A completion rule and progress records (`src/progress`): a lesson is complete
+  only when all of its checks have been answered correctly.
+- Versioned local persistence (`src/storage`) in the platform application data
+  directory, written through a temporary file and a rename.
+- Recovery for unusable saved data: the old file is kept aside and the learner is
+  told, rather than losing it silently.
+- Learning screens in the interface: dashboard with real progress, path view,
+  lesson reader, answer feedback and a next-lesson action.
 
 ### Changed
 
 - Documentation is being organized around the New Bearings project name.
+- `serde_json` is now a runtime dependency, because content parsing and saved
+  data both use it.
+- The README describes the current implementation instead of the original design
+  draft, and states plainly what does and does not work.
+- The Rust checks in CI install Tauri's Linux system libraries, run
+  `--all-targets`, and a separate job now builds the frontend.
 
 ### Fixed
 
-- No verified software fixes are recorded in this entry.
+- `cargo fmt --check` failed in CI on all three runners, which skipped
+  compilation, tests and Clippy entirely.
+- A wrong answer used to lock a knowledge check, which made a lesson impossible
+  to finish after a single mistake. Checks now stay open until they are answered
+  correctly.
 
 ## Release history
 
