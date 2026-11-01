@@ -1,3 +1,4 @@
 {
-    "explorer.compactFolders": false
+    "explorer.compactFolders": false,
+    "rust-analyzer.cargo.buildScripts.enable": true
 }

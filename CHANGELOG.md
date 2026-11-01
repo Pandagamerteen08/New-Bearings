@@ -45,6 +45,7 @@ Add a dated release entry when a release has actually been published.
 
 Use the following structure for future releases:
 
+```markdown
 ### [Version] - YYYY-MM-DD
 
 #### Added
@@ -66,6 +67,7 @@ Use the following structure for future releases:
 #### Security
 
 - Describe a security correction without exposing sensitive exploit details.
+```
 
 Omit empty categories when preparing a real release entry.
 
