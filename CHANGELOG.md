@@ -74,6 +74,9 @@ discussed or its implementation has begun.
   file.
 - A concrete, authoritative [docs/CONTENT_FORMAT.md](docs/CONTENT_FORMAT.md) for
   format version 2.
+- A `custom-protocol` Cargo feature, so an optimised build embeds the interface
+  instead of loading it from the development server. `tauri build --no-bundle`
+  enables it and produces a standalone executable.
 - Real installation instructions in [docs/INSTALLATION.md](docs/INSTALLATION.md),
   replacing a placeholder.
 - Tests now cover grading for each exercise kind, the review queue, bookmarks,
@@ -113,6 +116,13 @@ discussed or its implementation has begun.
 - Two lessons opened within the same second could make "continue learning" pick
   the wrong one, because resume compared second-resolution timestamps. It now
   stores the last opened lesson explicitly.
+- An executable built with plain `cargo build` opened
+  `http://localhost:5173` and showed `ERR_CONNECTION_REFUSED` when the dev
+  server was not running, because Tauri only embeds the interface with its
+  `custom-protocol` feature. The feature is now declared and
+  `scripts/build.ps1` uses `tauri build --no-bundle`, producing a release
+  executable that renders on its own. The installation guide explains the
+  difference.
 
 ### Removed
 

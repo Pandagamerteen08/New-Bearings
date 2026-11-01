@@ -59,16 +59,29 @@ dev server, which only the Tauri CLI starts.
 ## 4. Build a standalone executable
 
 ```bash
-npm --prefix frontend run build     # writes frontend/dist
-cargo build                         # embeds the built interface
+./frontend/node_modules/.bin/tauri.cmd build --no-bundle     # Windows
+./frontend/node_modules/.bin/tauri build --no-bundle         # macOS / Linux
 ```
 
-The result is `target/debug/new-bearings.exe` on Windows (or
-`target/debug/new-bearings` elsewhere). It starts without a dev server.
+The result is `target/release/new-bearings.exe` on Windows (or
+`target/release/new-bearings` elsewhere). It writes no development files, needs
+no server and starts like any other desktop application.
 
-On Windows, `./scripts/build.ps1` runs both steps. For an optimised build, use
-`cargo build --release` after building the frontend; it is not required and is
-not packaged for distribution.
+On Windows, `./scripts/build.ps1` does the same thing.
+
+**Why not `cargo build`?** Tauri only embeds the built interface when its
+`custom-protocol` feature is enabled, and `tauri build` enables it. A binary from
+plain `cargo build` (debug or release) still points at `http://localhost:5173`
+and shows `ERR_CONNECTION_REFUSED` when Vite is not running. If you must use
+Cargo directly:
+
+```bash
+npm --prefix frontend run build
+cargo build --release --features custom-protocol
+```
+
+Nothing is packaged or signed; `bundle.active` is `false`, so there is no
+installer.
 
 ## 5. Your data
 
@@ -110,6 +123,10 @@ on the port. Stop the other instance first.
 **`cargo build` fails with a missing `frontend/dist`.** Run
 `npm --prefix frontend run build` first; the configuration points the Rust build
 at that directory.
+
+**The executable opens a page saying `localhost refused to connect`.** It was
+built without the `custom-protocol` feature, so it is still looking for the
+development server. Rebuild with `tauri build --no-bundle`.
 
 **Progress is not saved.** The shared path is shown in the warning banner. The
 application data directory must be writable by your user.

@@ -72,6 +72,7 @@ Status labels used below mean:
 | Search | Verified | Rust-side search over path titles, summaries, subjects and tags, and lesson titles, summaries and objectives. |
 | Data recovery | Implemented | Unreadable files are moved aside as `app-state.recovered-<timestamp>.json` and reported. Tested in Rust. |
 | Reduced motion, focus, live regions | Verified | `prefers-reduced-motion` honoured; visible focus rings; results announced with `role="status"`. |
+| Standalone executable | Verified | `tauri build --no-bundle` embeds the interface; the release binary renders without Vite. A plain `cargo build` does **not**, because it still loads the development URL. |
 | Linux and macOS | Implemented | Both compile and pass tests in CI; the interface has not been run on them here. |
 | Accounts, sync, cloud | Planned | Not implemented, and not required to use the application. |
 | Spaced repetition scheduling | Planned | The review queue is mistake-driven, not time-driven. |
@@ -370,20 +371,25 @@ cargo clippy --all-targets -- -D warnings
 # Frontend type-check and production build
 npm --prefix frontend run build
 
-# Compile the executable without starting the interface
-npm --prefix frontend run build
-cargo build
+# Build a standalone optimised executable, with the interface embedded
+./frontend/node_modules/.bin/tauri.cmd build --no-bundle   # Windows
+./frontend/node_modules/.bin/tauri build --no-bundle       # macOS / Linux
 ```
 
 Notes:
 
-- `tauri.conf.json` runs the frontend build from `frontend/`, so `cargo build`
-  expects `frontend/dist` to exist. Build the frontend first.
+- A plain `cargo build` produces a development binary: Tauri only embeds the
+  interface when the `custom-protocol` feature is enabled, which `tauri build`
+  does for you. If you build with Cargo directly, use
+  `cargo build --release --features custom-protocol` after
+  `npm --prefix frontend run build`.
+- `tauri.conf.json` runs the frontend build from `frontend/`, so a Cargo build
+  expects `frontend/dist` to exist.
 - The PowerShell helpers under `scripts/` wrap the same commands:
   `scripts/test.ps1` runs formatting, compilation, tests, Clippy and the
-  frontend build; `scripts/build.ps1` compiles the executable; `scripts/run.ps1`
-  starts the development application; `scripts/setup-dev.ps1` checks that the
-  toolchain is present.
+  frontend build; `scripts/build.ps1` produces the standalone executable through
+  the Tauri CLI; `scripts/run.ps1` starts the development application;
+  `scripts/setup-dev.ps1` checks that the toolchain is present.
 - On Debian/Ubuntu, Tauri needs system libraries:
 
   ```bash

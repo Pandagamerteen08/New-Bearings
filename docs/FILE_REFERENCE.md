@@ -24,7 +24,7 @@ Role labels:
 | --- | --- | --- |
 | [`README.md`](../README.md) | Docs | Entry point: what the application does, status of each feature, architecture diagram, request flow, content overview, data location, development commands, testing, limitations and links to the rest of the documentation. |
 | [`CHANGELOG.md`](../CHANGELOG.md) | Docs | Record of changes that actually happened, grouped into Added/Changed/Fixed/Removed/Security, plus the template and accuracy rules for future entries. |
-| [`Cargo.toml`](https://github.com/Pandagamerteen08/New-Bearings/blob/main/Cargo.toml) | Config | Rust package metadata (`new-bearings` 0.1.0, edition 2024, MIT declared, not published) and the `[[bin]]` target `new-bearings` at `src/main.rs`. Dependencies: `serde` (derive), `serde_json`, `tauri` 2. Build dependency: `tauri-build` 2. |
+| [`Cargo.toml`](https://github.com/Pandagamerteen08/New-Bearings/blob/main/Cargo.toml) | Config | Rust package metadata (`new-bearings` 0.1.0, edition 2024, MIT declared, not published) and the `[[bin]]` target `new-bearings` at `src/main.rs`. Dependencies: `serde` (derive), `serde_json`, `tauri` 2. Build dependency: `tauri-build` 2. The `custom-protocol` feature enables `tauri/custom-protocol`, which embeds the built interface in the executable; `tauri build` turns it on, and plain `cargo build` does not, which is why such a binary still looks for the development server. |
 | `Cargo.lock` | Generated | Exact dependency graph resolved by Cargo, including Tauri and its transitive crates. Commit changes to it whenever dependencies change so builds are reproducible. Do not edit by hand. |
 | [`build.rs`](https://github.com/Pandagamerteen08/New-Bearings/blob/main/build.rs) | Dev / Runtime | Build script. Calls `tauri_build::build()`, which reads `tauri.conf.json`, validates the configuration and icons, generates the Tauri context used by `tauri::generate_context!`, and emits the ACL/capability data consumed at runtime. |
 | [`tauri.conf.json`](../tauri.conf.json) | Config | Tauri application configuration. `identifier` (`com.newbearings.desktop`) determines the app-data directory. `build` runs `npm run dev -- --host 127.0.0.1` before `tauri dev`, loads `http://localhost:5173`, runs `npm run build` before a release build, and reads `frontend/dist`. One 1100×760 window (minimum 720×560). `bundle.active` is `false`, so no installer is produced; `bundle.icon` lists the generated icon set. |
@@ -350,7 +350,7 @@ conveniences, not a separate build system.
 | --- | --- | --- |
 | [`scripts/setup-dev.ps1`](../scripts/setup-dev.ps1) | Dev | Checks for `rustc`, `cargo`, `rustup`, `git`, `node` and `npm`, reports whether `frontend/node_modules` exists, prints links for anything missing, and exits non-zero if a tool is absent. |
 | [`scripts/run.ps1`](../scripts/run.ps1) | Dev | Starts the application through `frontend/node_modules/.bin/tauri.cmd dev`, failing with an instruction if the CLI is not installed. `cargo run` alone is deliberately not used. |
-| [`scripts/build.ps1`](../scripts/build.ps1) | Dev | Builds the frontend (`npm --prefix frontend run build`), then `cargo build`, and reports the executable path and the fact that no installer is produced. |
+| [`scripts/build.ps1`](../scripts/build.ps1) | Dev | Produces a standalone executable with `tauri build --no-bundle`: the Tauri CLI builds the frontend, compiles with the `custom-protocol` feature and skips bundling. It reports `target\release\new-bearings.exe` and notes that the binary runs without a development server. |
 | [`scripts/test.ps1`](../scripts/test.ps1) | Dev / Test | Runs `cargo fmt --check`, `cargo check --all-targets`, `cargo test`, `cargo clippy --all-targets -- -D warnings` and `npm --prefix frontend run build`, stopping at the first failure. |
 
 ## `icons/`, `resources/`, `gen/schemas/`, `schemas/`
@@ -383,7 +383,7 @@ These are not tracked, but they explain what a working checkout contains:
 
 | Path | Produced by | Notes |
 | --- | --- | --- |
-| `target/` | `cargo build` / `cargo test` | Rust build output, including `target/debug/new-bearings.exe`. Ignored. |
+| `target/` | `cargo build` / `cargo test` / `tauri build` | Rust build output. `target/debug/new-bearings.exe` is a development binary that expects Vite; `target/release/new-bearings.exe` from `tauri build --no-bundle` is standalone. Ignored. |
 | `frontend/dist/` | `npm --prefix frontend run build` | The built interface, embedded by the Rust binary. Ignored. |
 | `frontend/node_modules/` | `npm install` | Frontend dependencies and the Tauri CLI. Ignored. |
 | `frontend/node_modules/.tmp/` | `vue-tsc -b` | TypeScript build information. |
