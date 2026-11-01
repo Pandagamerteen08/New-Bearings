@@ -3,13 +3,49 @@
 import { onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { welcomeContent } from '../../content/interface/welcome'
+import { setupContent } from '../../content/interface/setup'
+import {
+  beginSetup,
+  getSetupState,
+  returnToWelcome,
+  toSetupErrorCode,
+  type SetupErrorCode,
+  type SetupSnapshot,
+} from './backend/setup'
 
-const hasStarted = ref(false)
+// Rust owns the setup stage. This placeholder mirrors the backend's starting
+// stage so the welcome screen renders before the first snapshot arrives, and
+// keeps the application usable if the backend cannot be reached at all.
+const setup = ref<SetupSnapshot>({
+  stage: 'welcome',
+  canBegin: true,
+  canReturnToWelcome: false,
+})
+
 const appInfo = ref('')
 const backendError = ref('')
 const isCheckingBackend = ref(true)
+const setupError = ref('')
+const setupErrorDetails = ref('')
+const isTransitioning = ref(false)
 
-onMounted(async () => {
+function setupErrorMessage(code: SetupErrorCode | null): string | null {
+  switch (code) {
+    case 'already_started':
+      return setupContent.errorAlreadyStarted
+    case 'already_at_welcome':
+      return setupContent.errorAlreadyAtWelcome
+    default:
+      return null
+  }
+}
+
+function showSetupError(error: unknown, fallbackMessage: string) {
+  setupError.value = setupErrorMessage(toSetupErrorCode(error)) ?? fallbackMessage
+  setupErrorDetails.value = String(error)
+}
+
+async function loadAppInfo() {
   try {
     appInfo.value = await invoke<string>('get_app_info')
   } catch (error) {
@@ -17,6 +53,48 @@ onMounted(async () => {
   } finally {
     isCheckingBackend.value = false
   }
+}
+
+async function loadSetupState() {
+  try {
+    setup.value = await getSetupState()
+  } catch (error) {
+    showSetupError(error, setupContent.errorUnavailable)
+  }
+}
+
+async function runSetupCommand(
+  command: () => Promise<SetupSnapshot>,
+  failedMessage: string,
+) {
+  if (isTransitioning.value) {
+    return
+  }
+
+  isTransitioning.value = true
+  setupError.value = ''
+  setupErrorDetails.value = ''
+
+  try {
+    setup.value = await command()
+  } catch (error) {
+    showSetupError(error, failedMessage)
+  } finally {
+    isTransitioning.value = false
+  }
+}
+
+function startSetup() {
+  void runSetupCommand(beginSetup, setupContent.errorUnexpected)
+}
+
+function goBackToWelcome() {
+  void runSetupCommand(returnToWelcome, setupContent.errorUnexpected)
+}
+
+onMounted(() => {
+  void loadAppInfo()
+  void loadSetupState()
 })
 </script>
 
@@ -31,7 +109,7 @@ onMounted(async () => {
       <span class="version-label">{{ welcomeContent.accessLabel }}</span>
     </header>
 
-    <section v-if="!hasStarted" class="hero">
+    <section v-if="setup.stage === 'welcome'" class="hero">
       <div class="eyebrow">
         <span class="status-dot"></span>
         {{ welcomeContent.eyebrow }}
@@ -46,10 +124,23 @@ onMounted(async () => {
         {{ welcomeContent.description }}
       </p>
 
-      <button class="primary-button" @click="hasStarted = true">
+      <button
+        class="primary-button"
+        :disabled="isTransitioning || !setup.canBegin"
+        :aria-busy="isTransitioning"
+        @click="startSetup"
+      >
         {{ welcomeContent.getStartedButton }}
         <span aria-hidden="true">→</span>
       </button>
+
+      <div v-if="setupError" class="setup-error" role="alert">
+        <p>{{ setupError }}</p>
+        <details class="error-details">
+          <summary>{{ setupContent.errorDetailsLabel }}</summary>
+          <pre>{{ setupErrorDetails }}</pre>
+        </details>
+      </div>
 
       <p class="footnote">
         {{ welcomeContent.footnote }}
@@ -71,7 +162,12 @@ onMounted(async () => {
         {{ welcomeContent.nextDescription }}
       </p>
 
-      <button class="secondary-button" @click="hasStarted = false">
+      <button
+        class="secondary-button"
+        :disabled="isTransitioning || !setup.canReturnToWelcome"
+        :aria-busy="isTransitioning"
+        @click="goBackToWelcome"
+      >
         <span aria-hidden="true">←</span>
         {{ welcomeContent.backButton }}
       </button>
@@ -287,6 +383,13 @@ h1 {
   background: linear-gradient(110deg, #8178eb, #6a62ce);
 }
 
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+  transform: none;
+}
+
 .primary-button span,
 .secondary-button span {
   font-size: 19px;
@@ -307,6 +410,22 @@ h1 {
   margin-top: 20px;
   color: #777b90;
   font-size: 12px;
+}
+
+.setup-error {
+  max-width: 530px;
+  margin-top: 22px;
+  color: #ffb4b4;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.setup-error p {
+  margin: 0;
+}
+
+.setup-error .error-details {
+  margin-left: 0;
 }
 
 .footer {
