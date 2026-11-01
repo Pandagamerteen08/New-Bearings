@@ -1,23 +1,38 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "paths": [
     {
       "id": "rust-foundations",
       "title": "Rust Foundations",
-      "summary": "The first steps of Rust: a program that runs, values you can change, and functions that hand work back to you.",
+      "summary": "The first steps of Rust: a program that runs, values you can change, functions that hand work back to you, and the ownership rule that makes Rust different.",
       "subject": "Programming",
       "difficulty": "beginner",
+      "tags": ["rust", "programming", "ownership"],
       "lessons": [
         {
           "id": "first-program",
           "title": "Your first Rust program",
           "summary": "Where execution starts, what a statement is, and why println! has an exclamation mark.",
           "minutes": 6,
+          "objectives": [
+            "Name the function a Rust binary starts in.",
+            "Explain what a statement does and where one ends.",
+            "Recognise a macro call and say how it differs from a function call."
+          ],
           "sections": [
             {
               "kind": "explanation",
               "heading": "A program starts at main",
               "body": "Every Rust binary begins at a function called main. When the program runs, Rust calls main and executes the statements inside it from top to bottom. Nothing outside main runs on its own."
+            },
+            {
+              "kind": "steps",
+              "heading": "What happens when this program runs",
+              "steps": [
+                "Rust starts the program and calls main.",
+                "The single statement inside main runs and prints the text.",
+                "main returns, and the program ends."
+              ]
             },
             {
               "kind": "code",
@@ -28,10 +43,15 @@
             {
               "kind": "note",
               "body": "println! is a macro, which is why it ends with an exclamation mark. A macro can work with your source in ways an ordinary function cannot, such as inserting values into the text it prints."
+            },
+            {
+              "kind": "mistake",
+              "body": "A common mistake is to write println(\"Hello, world!\") without the exclamation mark. Rust then looks for an ordinary function named println, which does not exist, and the program does not compile."
             }
           ],
           "checks": [
             {
+              "kind": "choice",
               "id": "entry-point",
               "prompt": "Which function does a Rust binary start in?",
               "options": ["start()", "main()", "run()", "init()"],
@@ -39,6 +59,7 @@
               "explanation": "Rust calls main first. The other names have no special meaning to the language."
             },
             {
+              "kind": "choice",
               "id": "semicolon",
               "prompt": "What does the semicolon at the end of println!(\"Hello, world!\"); do?",
               "options": [
@@ -49,6 +70,13 @@
               ],
               "answer": 1,
               "explanation": "In Rust a semicolon ends a statement. Leaving it out where a statement is expected is a compile error."
+            },
+            {
+              "kind": "trueFalse",
+              "id": "macro-mark",
+              "prompt": "The exclamation mark in println! is what marks it as a macro call.",
+              "answer": true,
+              "explanation": "Macro calls end with an exclamation mark; a plain name followed by parentheses calls a function."
             }
           ]
         },
@@ -57,6 +85,11 @@
           "title": "Storing values in variables",
           "summary": "Bindings, immutability by default, and how Rust works out a type for you.",
           "minutes": 7,
+          "objectives": [
+            "Create a binding with let and make it changeable with mut.",
+            "Say why reassigning an immutable binding fails to compile.",
+            "Explain how Rust infers the type of a number."
+          ],
           "sections": [
             {
               "kind": "explanation",
@@ -70,13 +103,24 @@
               "code": "fn main() {\n    let name = \"Ada\";\n    let mut score = 10;\n    score = score + 5;\n    println!(\"{name} has {score} points\");\n}"
             },
             {
+              "kind": "table",
+              "heading": "Three ways to name a value",
+              "columns": ["Writing", "What it means"],
+              "rows": [
+                ["let total = 0;", "A fixed binding: it cannot be reassigned."],
+                ["let mut total = 0;", "A changeable binding: it can be reassigned while it is in scope."],
+                ["const TOTAL: i32 = 0;", "A constant: always written with a type and fixed at compile time."]
+              ]
+            },
+            {
               "kind": "explanation",
               "heading": "Types are usually inferred",
-              "body": "Nothing above names a type. Rust sees 10 used as a whole number and infers i32, its default integer type. Strings written between double quotes are borrowed text, written &str. You can always write the type yourself when it helps the reader."
+              "body": "Nothing above names a type. Rust sees 10 used as a whole number and infers i32, its default integer type. Text written between double quotes is borrowed text, written &str. You can always write the type yourself when it helps the reader."
             }
           ],
           "checks": [
             {
+              "kind": "choice",
               "id": "mut-binding",
               "prompt": "Which binding can be given a new value later?",
               "options": [
@@ -89,6 +133,7 @@
               "explanation": "Only mut allows reassignment. const and a plain let are fixed once created."
             },
             {
+              "kind": "choice",
               "id": "reassignment-error",
               "prompt": "Given let count = 3; which line fails to compile?",
               "options": [
@@ -99,6 +144,13 @@
               ],
               "answer": 1,
               "explanation": "count was created without mut, so it cannot be assigned a new value."
+            },
+            {
+              "kind": "trueFalse",
+              "id": "inferred-type",
+              "prompt": "With let score = 10; Rust still works out a type for score even though none was written.",
+              "answer": true,
+              "explanation": "Type inference fills in the type from how the value is used, so score becomes an i32 by default."
             }
           ]
         },
@@ -107,6 +159,11 @@
           "title": "Functions that return values",
           "summary": "Parameters with types, a declared return type, and the final expression that produces the answer.",
           "minutes": 8,
+          "objectives": [
+            "Read a function signature and say what it returns.",
+            "Explain why the final expression has no semicolon.",
+            "Trace a function call from the caller to its result."
+          ],
           "sections": [
             {
               "kind": "explanation",
@@ -120,12 +177,27 @@
               "code": "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\nfn main() {\n    let total = add(2, 3);\n    println!(\"2 + 3 = {total}\");\n}"
             },
             {
+              "kind": "steps",
+              "heading": "Following the call to add(2, 3)",
+              "steps": [
+                "main calls add, passing 2 and 3.",
+                "add binds those values to its parameters a and b.",
+                "The final expression a + b is evaluated and becomes the value of the call.",
+                "main stores that value in total and prints it."
+              ]
+            },
+            {
               "kind": "note",
               "body": "The body of add ends with a + b and no semicolon. Without the semicolon it is an expression whose value becomes the return value. Adding one turns it into a statement that produces nothing, which no longer matches the declared i32."
+            },
+            {
+              "kind": "mistake",
+              "body": "If add ended with a + b; the function would return () instead of i32, and the compiler would reject it. The semicolon throws the value away."
             }
           ],
           "checks": [
             {
+              "kind": "choice",
               "id": "return-arrow",
               "prompt": "In fn add(a: i32, b: i32) -> i32, what does -> i32 declare?",
               "options": [
@@ -138,6 +210,7 @@
               "explanation": "The arrow introduces the return type, so add gives back an i32."
             },
             {
+              "kind": "choice",
               "id": "final-expression",
               "prompt": "Why does a + b have no semicolon in fn add?",
               "options": [
@@ -148,6 +221,80 @@
               ],
               "answer": 1,
               "explanation": "The final expression is the return value. A semicolon would discard the value and break the declared return type."
+            },
+            {
+              "kind": "shortAnswer",
+              "id": "return-type-name",
+              "prompt": "Which word describes the value a function gives back? Type one word.",
+              "accepted": ["return value", "the return value", "result", "return"],
+              "explanation": "The value a function hands back is its return value, and its type is declared after the arrow."
+            }
+          ]
+        },
+        {
+          "id": "ownership",
+          "title": "Who owns a value",
+          "summary": "One owner per value, moves instead of copies, and why a String cannot be used after it is handed over.",
+          "minutes": 9,
+          "objectives": [
+            "State the ownership rule in one sentence.",
+            "Explain the difference between a move and a copy.",
+            "Predict which line of a program fails after a value is moved."
+          ],
+          "sections": [
+            {
+              "kind": "explanation",
+              "heading": "Every value has exactly one owner",
+              "body": "An owner is the binding responsible for a value. When the owner goes out of scope, the value is freed. Handing a value to another binding transfers that responsibility, which Rust calls a move."
+            },
+            {
+              "kind": "code",
+              "heading": "A move",
+              "language": "rust",
+              "code": "fn main() {\n    let name = String::from(\"Ada\");\n    let greeting = name; // the value moves into greeting\n\n    println!(\"{greeting}\");\n}"
+            },
+            {
+              "kind": "table",
+              "heading": "Move, copy and borrow",
+              "columns": ["Writing", "What happens"],
+              "rows": [
+                ["let b = a; where a is a String", "The value moves: a can no longer be used."],
+                ["let b = a; where a is an i32", "The value is copied: both bindings stay usable."],
+                ["let b = &a;", "a is borrowed: a still owns the value and both can be read."]
+              ]
+            },
+            {
+              "kind": "mistake",
+              "body": "A common mistake is assuming let greeting = name; copies the text. For types that own heap data, such as String, it moves it, so printing name afterwards does not compile."
+            }
+          ],
+          "checks": [
+            {
+              "kind": "choice",
+              "id": "move-not-copy",
+              "prompt": "After let first = String::from(\"hi\"); let second = first; what happened to first?",
+              "options": [
+                "It was moved, so it can no longer be used",
+                "It was copied, so both bindings are usable",
+                "It became a reference to second",
+                "It was emptied but is still usable"
+              ],
+              "answer": 0,
+              "explanation": "A String owns heap data, so assigning it to another binding moves ownership. Using first afterwards is a compile error."
+            },
+            {
+              "kind": "trueFalse",
+              "id": "copy-integers",
+              "prompt": "Assigning an i32 to another binding copies the value, so both bindings stay usable.",
+              "answer": true,
+              "explanation": "Simple number types implement Copy, so the assignment duplicates the value instead of moving it."
+            },
+            {
+              "kind": "shortAnswer",
+              "id": "ownership-rule",
+              "prompt": "Which Rust rule says that every value has exactly one owner? Type one word.",
+              "accepted": ["ownership", "ownership rule", "the ownership rule"],
+              "explanation": "Ownership is the rule. It is what decides when a value is freed and when it can no longer be used."
             }
           ]
         }

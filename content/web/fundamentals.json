@@ -1,0 +1,212 @@
+{
+  "formatVersion": 2,
+  "paths": [
+    {
+      "id": "web-fundamentals",
+      "title": "How the Web Works",
+      "summary": "What actually happens between typing an address and seeing a page: requests and responses, the structure of an HTML document, and the rules that style it.",
+      "subject": "Web development",
+      "difficulty": "beginner",
+      "tags": ["http", "html", "css", "web"],
+      "lessons": [
+        {
+          "id": "requests-and-responses",
+          "title": "Requests and responses",
+          "summary": "The browser asks, the server answers, and the status code says how it went.",
+          "minutes": 7,
+          "objectives": [
+            "Describe the request and response pair that fetches a page.",
+            "Read the status code of a response.",
+            "Name the method a browser uses to fetch a page."
+          ],
+          "sections": [
+            {
+              "kind": "explanation",
+              "heading": "A conversation, not a broadcast",
+              "body": "A browser does not receive pages on its own. It sends an HTTP request to a server and waits for an HTTP response. The response carries a status code, some headers describing the content, and usually a body containing the page itself."
+            },
+            {
+              "kind": "steps",
+              "heading": "What happens when you open a page",
+              "steps": [
+                "The browser turns the domain name into an IP address.",
+                "It opens a connection to that address and sends an HTTP request.",
+                "The server handles the request and replies with a status code and a body.",
+                "The browser reads the HTML and requests the images, styles and scripts it mentions."
+              ]
+            },
+            {
+              "kind": "code",
+              "heading": "A request and its response",
+              "language": "http",
+              "code": "GET /index.html HTTP/1.1\nHost: example.com\n\nHTTP/1.1 200 OK\nContent-Type: text/html\n\n<!doctype html>\n<title>Example</title>"
+            },
+            {
+              "kind": "table",
+              "heading": "Status codes worth knowing",
+              "columns": ["Code", "Meaning"],
+              "rows": [
+                ["200", "OK: the request succeeded and a body follows."],
+                ["301", "Moved Permanently: the resource now lives at another address."],
+                ["404", "Not Found: the server has nothing at that address."],
+                ["500", "Internal Server Error: the server failed while handling the request."]
+              ]
+            },
+            {
+              "kind": "mistake",
+              "body": "A 404 is an answer, not a broken connection. The server responded successfully and told the browser that the resource does not exist."
+            }
+          ],
+          "checks": [
+            {
+              "kind": "choice",
+              "id": "not-found-code",
+              "prompt": "Which status code means the server could not find the requested resource?",
+              "options": ["200", "301", "404", "500"],
+              "answer": 2,
+              "explanation": "404 means Not Found. A 500 means the server itself failed, which is a different problem."
+            },
+            {
+              "kind": "trueFalse",
+              "id": "response-carries-body",
+              "prompt": "An HTTP response can carry a body containing the page itself.",
+              "answer": true,
+              "explanation": "The response body is where the HTML, image or other content arrives."
+            },
+            {
+              "kind": "shortAnswer",
+              "id": "page-method",
+              "prompt": "Which HTTP method does a browser usually use to fetch a page? Type one word.",
+              "accepted": ["get"],
+              "explanation": "GET asks for a representation of a resource without changing it."
+            }
+          ]
+        },
+        {
+          "id": "html-structure",
+          "title": "The structure of an HTML page",
+          "summary": "Elements, attributes, and the difference between the head and the body of a document.",
+          "minutes": 6,
+          "objectives": [
+            "Recognise an element, its tag name and its attributes.",
+            "Say what belongs in the head and what belongs in the body.",
+            "Explain how a page gets its title."
+          ],
+          "sections": [
+            {
+              "kind": "explanation",
+              "heading": "Elements describe the structure",
+              "body": "HTML marks up content with elements. An element starts with a tag name in angle brackets and usually ends with a closing tag. Attributes sit inside the opening tag and add information, such as lang=\"en\" on the html element."
+            },
+            {
+              "kind": "code",
+              "heading": "A complete, if small, document",
+              "language": "html",
+              "code": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <title>First page</title>\n  </head>\n  <body>\n    <h1>Hello</h1>\n    <p>A paragraph of text.</p>\n  </body>\n</html>"
+            },
+            {
+              "kind": "note",
+              "body": "The head holds information about the page, such as its title and character set. The body holds what the visitor actually sees."
+            },
+            {
+              "kind": "mistake",
+              "body": "Text placed directly in the head does not appear on the page. Only content inside the body is displayed."
+            }
+          ],
+          "checks": [
+            {
+              "kind": "choice",
+              "id": "visible-content",
+              "prompt": "Which element holds the content a visitor sees?",
+              "options": ["head", "body", "title", "meta"],
+              "answer": 1,
+              "explanation": "The body contains the displayed content; the head describes the document."
+            },
+            {
+              "kind": "choice",
+              "id": "attribute-role",
+              "prompt": "What does an attribute such as lang=\"en\" describe?",
+              "options": [
+                "Extra information about the element",
+                "A paragraph of text",
+                "A CSS rule",
+                "A network request"
+              ],
+              "answer": 0,
+              "explanation": "Attributes configure an element. lang tells the browser which language the content is written in."
+            },
+            {
+              "kind": "shortAnswer",
+              "id": "title-element",
+              "prompt": "Which element sets the text shown in the browser tab? Type the element name only.",
+              "accepted": ["title", "<title>"],
+              "explanation": "The title element in the head supplies the text for the tab and for bookmarks."
+            }
+          ]
+        },
+        {
+          "id": "css-styling",
+          "title": "Styling with CSS",
+          "summary": "Selectors choose elements, declarations change how they look, and small mistakes change what is selected.",
+          "minutes": 6,
+          "objectives": [
+            "Read a CSS rule as a selector plus declarations.",
+            "Match element, class and id selectors to the elements they target.",
+            "Spot a selector that targets the wrong thing."
+          ],
+          "sections": [
+            {
+              "kind": "explanation",
+              "heading": "Rules select, then declare",
+              "body": "A CSS rule has a selector and a block of declarations. The selector chooses which elements the rule applies to, and each declaration sets one property to a value."
+            },
+            {
+              "kind": "code",
+              "heading": "Two rules",
+              "language": "css",
+              "code": "body {\n  font-family: system-ui, sans-serif;\n  line-height: 1.5;\n}\n\n.note {\n  color: #444444;\n}"
+            },
+            {
+              "kind": "table",
+              "heading": "Selector shapes",
+              "columns": ["Selector", "What it matches"],
+              "rows": [
+                ["p", "Every paragraph element."],
+                [".note", "Every element whose class attribute contains note."],
+                ["#main", "The element whose id is main."]
+              ]
+            },
+            {
+              "kind": "mistake",
+              "body": "A class selector needs a leading dot. Writing note { } looks for a <note> element, not for an element with class=\"note\"."
+            }
+          ],
+          "checks": [
+            {
+              "kind": "trueFalse",
+              "id": "class-selector",
+              "prompt": ".note selects every element whose class attribute contains note.",
+              "answer": true,
+              "explanation": "The dot marks a class selector, and an element can carry several classes."
+            },
+            {
+              "kind": "choice",
+              "id": "id-selector",
+              "prompt": "Which selector matches the element with id=\"main\"?",
+              "options": ["main", ".main", "#main", "*main"],
+              "answer": 2,
+              "explanation": "An id selector starts with a hash: #main."
+            },
+            {
+              "kind": "shortAnswer",
+              "id": "paragraph-selector",
+              "prompt": "Which selector matches every paragraph element? Type the selector.",
+              "accepted": ["p"],
+              "explanation": "The element selector p matches every paragraph, so p { } styles all of them."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

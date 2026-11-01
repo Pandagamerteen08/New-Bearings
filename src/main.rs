@@ -20,7 +20,8 @@ mod storage;
 use tauri::Manager;
 
 use app::{AnswerOutcome, Session};
-use learning::{LearningError, LearningSnapshot};
+use learning::{LearningError, LearningSnapshot, SearchHit};
+use lessons::SubmittedAnswer;
 use setup::{SetupError, SetupSnapshot};
 
 #[tauri::command]
@@ -73,6 +74,20 @@ fn open_learning_lesson(
 }
 
 #[tauri::command]
+fn show_learning_dashboard(
+    session: tauri::State<'_, Session>,
+) -> Result<LearningSnapshot, LearningError> {
+    session.show_dashboard()
+}
+
+#[tauri::command]
+fn show_learning_review(
+    session: tauri::State<'_, Session>,
+) -> Result<LearningSnapshot, LearningError> {
+    session.show_review()
+}
+
+#[tauri::command]
 fn go_back_in_learning(
     session: tauri::State<'_, Session>,
 ) -> Result<LearningSnapshot, LearningError> {
@@ -85,9 +100,26 @@ fn submit_lesson_answer(
     path_id: String,
     lesson_id: String,
     check_id: String,
-    option: usize,
+    answer: SubmittedAnswer,
 ) -> Result<AnswerOutcome, LearningError> {
-    session.submit_answer(&path_id, &lesson_id, &check_id, option)
+    session.submit_answer(&path_id, &lesson_id, &check_id, &answer)
+}
+
+#[tauri::command]
+fn toggle_lesson_bookmark(
+    session: tauri::State<'_, Session>,
+    path_id: String,
+    lesson_id: String,
+) -> Result<LearningSnapshot, LearningError> {
+    session.toggle_bookmark(&path_id, &lesson_id)
+}
+
+#[tauri::command]
+fn search_learning(
+    session: tauri::State<'_, Session>,
+    query: String,
+) -> Result<Vec<SearchHit>, LearningError> {
+    session.search(&query)
 }
 
 fn main() {
@@ -111,8 +143,12 @@ fn main() {
             get_learning_state,
             open_learning_path,
             open_learning_lesson,
+            show_learning_dashboard,
+            show_learning_review,
             go_back_in_learning,
-            submit_lesson_answer
+            submit_lesson_answer,
+            toggle_lesson_bookmark,
+            search_learning
         ])
         .run(context);
 

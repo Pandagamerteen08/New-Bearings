@@ -1,12 +1,14 @@
-//! Local persistence for the learner's setup stage and progress.
+//! Local persistence for the learner's setup stage, progress and bookmarks.
 //!
 //! The data lives in one versioned JSON file inside the application data
 //! directory. Writes go to a temporary file that is then renamed over the real
 //! one, so an interrupted save cannot leave a half-written file behind.
 //!
-//! Saved data is never deleted silently: if a file cannot be used it is moved
-//! aside and the learner is told what happened.
+//! Saved data is never deleted silently: a file written by an older format is
+//! migrated in place, and a file that cannot be used at all is moved aside and
+//! the learner is told what happened.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -14,11 +16,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::progress::ProgressState;
+use crate::progress::{LegacyLessonRecord, ProgressState};
 use crate::setup::SetupStage;
 
 /// The version of the saved file format that this build writes and reads.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// The file name used inside the application data directory.
 pub const STATE_FILE_NAME: &str = "app-state.json";
@@ -77,6 +79,22 @@ impl std::fmt::Display for StorageError {
 
 impl std::error::Error for StorageError {}
 
+/// Just enough of the file to decide how to read the rest of it.
+#[derive(Debug, Deserialize)]
+struct VersionProbe {
+    version: u32,
+}
+
+/// The saved file shape written by format version 1.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V1AppData {
+    #[serde(default)]
+    setup_stage: SetupStage,
+    #[serde(default)]
+    progress: BTreeMap<String, LegacyLessonRecord>,
+}
+
 /// Reads and writes the application data file.
 #[derive(Debug, Clone)]
 pub struct AppStorage {
@@ -125,14 +143,25 @@ impl AppStorage {
             };
         }
 
-        match serde_json::from_str::<AppData>(&raw) {
-            Ok(data) if data.version == SCHEMA_VERSION => LoadOutcome { data, notice: None },
-            Ok(data) => self.recover(format!(
-                "Your saved progress was written by a different version of New Bearings (format {}), so it could not be used.",
-                data.version
-            )),
-            Err(error) => self.recover(format!(
-                "Your saved progress could not be understood ({error}), so New Bearings started fresh."
+        let version = match serde_json::from_str::<VersionProbe>(&raw) {
+            Ok(probe) => probe.version,
+            Err(error) => {
+                return self.recover(format!(
+                    "Your saved progress could not be understood ({error}), so New Bearings started fresh."
+                ));
+            }
+        };
+
+        match version {
+            SCHEMA_VERSION => match serde_json::from_str::<AppData>(&raw) {
+                Ok(data) => LoadOutcome { data, notice: None },
+                Err(error) => self.recover(format!(
+                    "Your saved progress could not be understood ({error}), so New Bearings started fresh."
+                )),
+            },
+            1 => self.migrate_from_v1(&raw),
+            other => self.recover(format!(
+                "Your saved progress was written by a different version of New Bearings (format {other}), so it could not be used."
             )),
         }
     }
@@ -177,6 +206,33 @@ impl AppStorage {
         }
 
         Ok(())
+    }
+
+    /// Converts a version 1 file to the current shape.
+    ///
+    /// The migrated data is written straight back, so the conversion happens
+    /// once. If that write fails the data is still usable for this run and the
+    /// next save retries it, which is why the failure is not reported as data
+    /// loss.
+    fn migrate_from_v1(&self, raw: &str) -> LoadOutcome {
+        let legacy: V1AppData = match serde_json::from_str(raw) {
+            Ok(legacy) => legacy,
+            Err(error) => {
+                return self.recover(format!(
+                    "Your saved progress could not be understood ({error}), so New Bearings started fresh."
+                ));
+            }
+        };
+
+        let data = AppData {
+            version: SCHEMA_VERSION,
+            setup_stage: legacy.setup_stage,
+            progress: ProgressState::from_legacy(legacy.progress),
+        };
+
+        let _ = self.save(&data);
+
+        LoadOutcome { data, notice: None }
     }
 
     /// Moves an unusable file aside so nothing is destroyed, and explains why.
@@ -250,12 +306,17 @@ mod tests {
     fn sample_data() -> AppData {
         let mut data = AppData::fresh();
         data.setup_stage = SetupStage::Learning;
-        data.progress.record_correct(
+        data.progress.record_attempt(
             &LessonKey::new("rust-foundations", "first-program"),
             "entry-point",
+            true,
             &["entry-point".to_owned(), "semicolon".to_owned()],
             1_700_000_000,
         );
+        data.progress
+            .mark_opened(&LessonKey::new("rust-foundations", "variables"));
+        data.progress
+            .toggle_bookmark(&LessonKey::new("rust-foundations", "functions"));
 
         data
     }
@@ -334,7 +395,65 @@ mod tests {
     }
 
     #[test]
-    fn data_from_another_version_is_kept_and_explained() {
+    fn a_version_one_file_is_migrated_and_rewritten() {
+        let directory = TempDirectory::new("migrate");
+        let storage = directory.storage();
+
+        fs::write(
+            storage.path(),
+            br#"{
+                "version": 1,
+                "setupStage": "learning",
+                "progress": {
+                    "rust-foundations/first-program": {
+                        "correctChecks": ["entry-point", "semicolon"],
+                        "completedAt": 1700000000
+                    },
+                    "rust-foundations/variables": {
+                        "correctChecks": ["mut-binding"]
+                    }
+                }
+            }"#,
+        )
+        .expect("version 1 file should be written");
+
+        let outcome = storage.load();
+
+        assert!(outcome.notice.is_none(), "migrating is not a failure");
+
+        let complete = LessonKey::new("rust-foundations", "first-program");
+        let partial = LessonKey::new("rust-foundations", "variables");
+
+        assert!(outcome.data.progress.is_complete(&complete));
+        assert!(!outcome.data.progress.is_complete(&partial));
+        assert_eq!(
+            outcome
+                .data
+                .progress
+                .lesson(&complete)
+                .and_then(|record| record.completed_at()),
+            Some(1_700_000_000)
+        );
+        assert_eq!(
+            outcome
+                .data
+                .progress
+                .lesson(&partial)
+                .map(|record| record.solved_count()),
+            Some(1)
+        );
+
+        // The migrated file is written in the current format, so the conversion
+        // happens once.
+        let rewritten = fs::read_to_string(storage.path()).expect("file should be readable");
+        let stored: AppData = serde_json::from_str(&rewritten).expect("file should be current");
+
+        assert_eq!(stored.version, SCHEMA_VERSION);
+        assert_eq!(stored, outcome.data);
+    }
+
+    #[test]
+    fn a_newer_format_is_kept_aside_and_explained() {
         let directory = TempDirectory::new("version");
         let storage = directory.storage();
         fs::write(
@@ -370,7 +489,7 @@ mod tests {
     fn missing_optional_fields_fall_back_to_their_defaults() {
         let directory = TempDirectory::new("defaults");
         let storage = directory.storage();
-        fs::write(storage.path(), br#"{"version": 1}"#).expect("file should be written");
+        fs::write(storage.path(), br#"{"version": 2}"#).expect("file should be written");
 
         let outcome = storage.load();
 

@@ -9,7 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
-use crate::learning::{Catalog, LearningError, LearningSession, LearningSnapshot, evaluate_answer};
+use crate::learning::{
+    Catalog, LearningError, LearningSession, LearningSnapshot, SearchHit, evaluate_answer,
+};
+use crate::lessons::SubmittedAnswer;
 use crate::progress::{AnswerEffect, LessonKey, ProgressState};
 use crate::setup::{SetupError, SetupSnapshot, SetupState};
 use crate::storage::{AppData, AppStorage, SCHEMA_VERSION};
@@ -151,7 +154,8 @@ impl Session {
         Self::snapshot_of(&inner)
     }
 
-    /// Opens a lesson inside a learning path.
+    /// Opens a lesson inside a learning path and remembers that it was opened,
+    /// so "continue learning" can return here.
     pub fn open_lesson(
         &self,
         path_id: &str,
@@ -161,6 +165,28 @@ impl Session {
         let mut inner = self.lock();
 
         inner.learning.open_lesson(catalog, path_id, lesson_id)?;
+        inner
+            .progress
+            .mark_opened(&LessonKey::new(path_id, lesson_id));
+        inner.persist();
+
+        Self::snapshot_of(&inner)
+    }
+
+    /// Shows the lessons that need another look.
+    pub fn show_review(&self) -> Result<LearningSnapshot, LearningError> {
+        let mut inner = self.lock();
+
+        inner.learning.show_review();
+
+        Self::snapshot_of(&inner)
+    }
+
+    /// Returns to the dashboard from any learning screen.
+    pub fn show_dashboard(&self) -> Result<LearningSnapshot, LearningError> {
+        let mut inner = self.lock();
+
+        inner.learning.show_dashboard();
 
         Self::snapshot_of(&inner)
     }
@@ -174,41 +200,72 @@ impl Session {
         Self::snapshot_of(&inner)
     }
 
-    /// Judges an answer, records it when correct, and saves.
+    /// Judges an answer, records the attempt, and saves.
+    ///
+    /// Wrong answers are stored too: they do not count towards completion but
+    /// they are what the review screen is built from.
     pub fn submit_answer(
         &self,
         path_id: &str,
         lesson_id: &str,
         check_id: &str,
-        option: usize,
+        answer: &SubmittedAnswer,
     ) -> Result<AnswerOutcome, LearningError> {
         let catalog = catalog()?;
-        let evaluated = evaluate_answer(catalog, path_id, lesson_id, check_id, option)?;
+        let evaluated = evaluate_answer(catalog, path_id, lesson_id, check_id, answer)?;
         let mut inner = self.lock();
 
-        let mut lesson_completed = false;
+        let effect = inner.progress.record_attempt(
+            &LessonKey::new(path_id, lesson_id),
+            check_id,
+            evaluated.correct,
+            &evaluated.required_checks,
+            unix_seconds(),
+        );
 
-        if evaluated.correct {
-            let key = LessonKey::new(path_id, lesson_id);
-            let effect = inner.progress.record_correct(
-                &key,
-                check_id,
-                &evaluated.required_checks,
-                unix_seconds(),
-            );
-
-            lesson_completed = effect == AnswerEffect::LessonCompleted;
-            inner.persist();
-        }
+        inner.persist();
 
         let snapshot = Self::snapshot_of(&inner)?;
 
         Ok(AnswerOutcome {
             correct: evaluated.correct,
             explanation: evaluated.explanation,
-            lesson_completed,
+            lesson_completed: effect == AnswerEffect::LessonCompleted,
             snapshot,
         })
+    }
+
+    /// Saves or unsaves a lesson for later.
+    pub fn toggle_bookmark(
+        &self,
+        path_id: &str,
+        lesson_id: &str,
+    ) -> Result<LearningSnapshot, LearningError> {
+        let catalog = catalog()?;
+
+        if catalog.path(path_id).is_none() {
+            return Err(LearningError::PathNotFound);
+        }
+
+        if catalog.lesson(path_id, lesson_id).is_none() {
+            return Err(LearningError::LessonNotFound);
+        }
+
+        let mut inner = self.lock();
+
+        inner
+            .progress
+            .toggle_bookmark(&LessonKey::new(path_id, lesson_id));
+        inner.persist();
+
+        Self::snapshot_of(&inner)
+    }
+
+    /// Finds paths and lessons whose text matches `query`.
+    pub fn search(&self, query: &str) -> Result<Vec<SearchHit>, LearningError> {
+        let catalog = catalog()?;
+
+        Ok(catalog.search(query))
     }
 
     fn snapshot_of(inner: &Inner) -> Result<LearningSnapshot, LearningError> {
@@ -260,7 +317,7 @@ fn unix_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::learning::Screen;
+    use crate::learning::{Screen, correct_answer, wrong_answer};
     use crate::setup::SetupStage;
 
     struct TempDirectory {
@@ -382,25 +439,73 @@ mod tests {
     }
 
     #[test]
-    fn a_wrong_answer_is_not_recorded() {
+    fn continue_learning_returns_to_the_lesson_last_opened() {
+        let directory = TempDirectory::new("continue");
+        let session = session(&directory);
+        let catalog = Catalog::embedded().expect("content");
+        let path = &catalog.paths()[0];
+        let later = &path.lessons[1];
+
+        session
+            .open_lesson(&path.id, &path.lessons[0].id)
+            .expect("first lesson opens");
+        session
+            .open_lesson(&path.id, &later.id)
+            .expect("second lesson opens");
+        session.go_back().expect("back");
+
+        let snapshot = session.learning_snapshot().expect("snapshot");
+        let resume = snapshot.resume.expect("there is unfinished work");
+
+        assert_eq!(resume.lesson_id, later.id);
+    }
+
+    #[test]
+    fn a_wrong_answer_is_remembered_but_does_not_count_as_progress() {
         let directory = TempDirectory::new("wrong");
         let session = session(&directory);
         let (path_id, lesson_id) = first_path_and_lesson();
         let catalog = Catalog::embedded().expect("content");
         let check = &catalog.lesson(path_id, lesson_id).expect("lesson").checks[0];
-        let wrong = (check.answer() + 1) % check.options.len();
 
         let outcome = session
-            .submit_answer(path_id, lesson_id, &check.id, wrong)
+            .submit_answer(path_id, lesson_id, check.id(), &wrong_answer(check))
             .expect("answer is accepted");
 
         assert!(!outcome.correct);
         assert!(!outcome.lesson_completed);
         assert!(!outcome.explanation.is_empty());
         assert_eq!(
-            outcome.snapshot.paths[0].lessons[0].answered_count, 0,
+            outcome.snapshot.paths[0].lessons[0].solved_count, 0,
             "an incorrect answer must not count as progress"
         );
+        assert_eq!(
+            outcome.snapshot.paths[0].lessons[0].mistakes, 1,
+            "the mistake is kept for review"
+        );
+        assert_eq!(outcome.snapshot.review.len(), 1);
+    }
+
+    #[test]
+    fn a_mistake_survives_a_restart() {
+        let directory = TempDirectory::new("mistake-restart");
+        let (path_id, lesson_id) = first_path_and_lesson();
+        let catalog = Catalog::embedded().expect("content");
+        let check = &catalog.lesson(path_id, lesson_id).expect("lesson").checks[0];
+
+        {
+            let session = session(&directory);
+            session
+                .submit_answer(path_id, lesson_id, check.id(), &wrong_answer(check))
+                .expect("answer is accepted");
+        }
+
+        let reopened = session(&directory);
+        let snapshot = reopened.learning_snapshot().expect("snapshot");
+
+        assert_eq!(snapshot.review.len(), 1);
+        assert_eq!(snapshot.review[0].mistakes, 1);
+        assert_eq!(snapshot.summary.mistakes, 1);
     }
 
     #[test]
@@ -418,7 +523,7 @@ mod tests {
 
             for (index, check) in lesson.checks.iter().enumerate() {
                 let outcome = session
-                    .submit_answer(path_id, lesson_id, &check.id, check.answer())
+                    .submit_answer(path_id, lesson_id, check.id(), &correct_answer(check))
                     .expect("answer is accepted");
 
                 assert!(outcome.correct);
@@ -436,6 +541,86 @@ mod tests {
         assert!(snapshot.paths[0].lessons[0].completed);
         assert_eq!(snapshot.paths[0].completed_lessons, 1);
         assert!(snapshot.storage_warning.is_none());
+        assert_eq!(snapshot.summary.checks_solved, lesson.checks.len());
+    }
+
+    #[test]
+    fn bookmarks_survive_a_restart() {
+        let directory = TempDirectory::new("bookmarks");
+        let (path_id, lesson_id) = first_path_and_lesson();
+
+        {
+            let session = session(&directory);
+            let snapshot = session
+                .toggle_bookmark(path_id, lesson_id)
+                .expect("bookmark toggles");
+
+            assert!(snapshot.paths[0].lessons[0].bookmarked);
+        }
+
+        let reopened = session(&directory);
+        let snapshot = reopened.learning_snapshot().expect("snapshot");
+
+        assert!(snapshot.paths[0].lessons[0].bookmarked);
+        assert_eq!(snapshot.summary.bookmarks, 1);
+
+        let cleared = reopened
+            .toggle_bookmark(path_id, lesson_id)
+            .expect("bookmark toggles");
+
+        assert!(!cleared.paths[0].lessons[0].bookmarked);
+        assert_eq!(cleared.summary.bookmarks, 0);
+    }
+
+    #[test]
+    fn bookmarks_for_unknown_lessons_are_rejected() {
+        let directory = TempDirectory::new("bookmark-unknown");
+        let session = session(&directory);
+        let (path_id, _) = first_path_and_lesson();
+
+        assert_eq!(
+            session.toggle_bookmark(path_id, "does-not-exist"),
+            Err(LearningError::LessonNotFound)
+        );
+        assert_eq!(
+            session.toggle_bookmark("does-not-exist", "does-not-exist"),
+            Err(LearningError::PathNotFound)
+        );
+    }
+
+    #[test]
+    fn the_review_screen_lists_mistakes_and_opens_them() {
+        let directory = TempDirectory::new("review");
+        let session = session(&directory);
+        let (path_id, lesson_id) = first_path_and_lesson();
+        let catalog = Catalog::embedded().expect("content");
+        let check = &catalog.lesson(path_id, lesson_id).expect("lesson").checks[0];
+
+        session
+            .submit_answer(path_id, lesson_id, check.id(), &wrong_answer(check))
+            .expect("answer is accepted");
+
+        let review = session.show_review().expect("review screen");
+
+        assert_eq!(review.screen, Screen::Review);
+        assert_eq!(review.review.len(), 1);
+
+        let opened = session
+            .open_lesson(&review.review[0].path_id, &review.review[0].lesson_id)
+            .expect("review item opens");
+
+        assert!(matches!(opened.screen, Screen::Lesson { .. }));
+    }
+
+    #[test]
+    fn search_reaches_the_backend() {
+        let directory = TempDirectory::new("search");
+        let session = session(&directory);
+
+        let hits = session.search("rust").expect("search works");
+
+        assert!(!hits.is_empty());
+        assert!(session.search("   ").expect("search works").is_empty());
     }
 
     #[test]
@@ -487,7 +672,7 @@ mod tests {
         let check = &catalog.lesson(path_id, lesson_id).expect("lesson").checks[0];
 
         let outcome = session
-            .submit_answer(path_id, lesson_id, &check.id, check.answer())
+            .submit_answer(path_id, lesson_id, check.id(), &correct_answer(check))
             .expect("answer is accepted");
 
         assert!(
@@ -506,5 +691,38 @@ mod tests {
         let snapshot = session.learning_snapshot().expect("snapshot");
 
         assert!(snapshot.storage_warning.is_some());
+    }
+
+    #[test]
+    fn a_version_one_file_keeps_its_progress() {
+        let directory = TempDirectory::new("migrate");
+        let storage = directory.storage();
+        let catalog = Catalog::embedded().expect("content");
+        let path = &catalog.paths()[0];
+        let lesson = &path.lessons[0];
+
+        std::fs::write(
+            storage.path(),
+            format!(
+                r#"{{"version":1,"setupStage":"learning","progress":{{"{}/{}":{{"correctChecks":["{}"],"completedAt":1700000000}}}}}}"#,
+                path.id,
+                lesson.id,
+                lesson.checks[0].id()
+            ),
+        )
+        .expect("version 1 file should be written");
+
+        let session = Session::open(storage);
+        let snapshot = session.learning_snapshot().expect("snapshot");
+
+        assert!(
+            snapshot.storage_warning.is_none(),
+            "migration is not a failure"
+        );
+        assert_eq!(
+            snapshot.paths[0].lessons[0].solved_count, 1,
+            "the correct answer from the old file is kept"
+        );
+        assert!(snapshot.paths[0].lessons[0].completed_at.is_some());
     }
 }

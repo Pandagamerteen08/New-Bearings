@@ -9,14 +9,26 @@ use std::sync::OnceLock;
 
 use serde::{Serialize, Serializer};
 
-use crate::lessons::{self, ContentProblem, Difficulty, Lesson, LessonView, Path};
+use crate::lessons::{
+    self, AnswerProblem, ContentProblem, Difficulty, Lesson, LessonView, Path, SubmittedAnswer,
+};
+
+#[cfg(test)]
+use crate::lessons::Check;
 use crate::progress::{LessonKey, ProgressState};
 
-/// The bundled content files. Adding a pack means adding a line here, and its
+/// The bundled content files. Adding a pack means adding a line here; its
 /// content is validated by the tests in this module.
-const EMBEDDED_PACKS: &[&str] = &[include_str!(
-    "../../content/programming/rust/foundations.json"
-)];
+const EMBEDDED_PACKS: &[&str] = &[
+    include_str!("../../content/programming/rust/foundations.json"),
+    include_str!("../../content/web/fundamentals.json"),
+];
+
+/// How many search results are returned at most.
+const MAX_SEARCH_HITS: usize = 20;
+
+/// How much of a matching passage is shown in a search result.
+const EXCERPT_LENGTH: usize = 140;
 
 static CATALOG: OnceLock<Result<Catalog, Vec<ContentProblem>>> = OnceLock::new();
 
@@ -43,6 +55,27 @@ impl Catalog {
                 paths.append(&mut parsed);
             }
 
+            // Packs are validated separately, so ids colliding across packs are
+            // checked once they are merged.
+            let duplicates: Vec<ContentProblem> = paths
+                .iter()
+                .enumerate()
+                .filter(|(index, path)| paths[..*index].iter().any(|other| other.id == path.id))
+                .map(|(index, path)| {
+                    ContentProblem::new(
+                        format!("paths[{index}].id"),
+                        format!(
+                            "the learning path id `{}` is used by more than one content pack",
+                            path.id
+                        ),
+                    )
+                })
+                .collect();
+
+            if !duplicates.is_empty() {
+                return Err(duplicates);
+            }
+
             Ok(Catalog { paths })
         });
 
@@ -66,6 +99,123 @@ impl Catalog {
     pub fn lesson(&self, path_id: &str, lesson_id: &str) -> Option<&Lesson> {
         self.path(path_id).and_then(|path| path.lesson(lesson_id))
     }
+
+    /// Finds paths and lessons whose text contains `query`.
+    ///
+    /// Matching ignores case and covers path titles, summaries, subjects and
+    /// tags, plus lesson titles, summaries and objectives. An empty query
+    /// matches nothing rather than everything.
+    pub fn search(&self, query: &str) -> Vec<SearchHit> {
+        let needle = query.trim().to_lowercase();
+
+        if needle.is_empty() {
+            return Vec::new();
+        }
+
+        let mut hits = Vec::new();
+
+        for path in &self.paths {
+            if let Some(text) = matching_path_text(path, &needle) {
+                hits.push(SearchHit {
+                    path_id: path.id.clone(),
+                    path_title: path.title.clone(),
+                    lesson_id: None,
+                    lesson_title: None,
+                    matched: MatchedField::Path,
+                    text,
+                });
+            }
+
+            for lesson in &path.lessons {
+                if let Some(text) = matching_lesson_text(lesson, &needle) {
+                    hits.push(SearchHit {
+                        path_id: path.id.clone(),
+                        path_title: path.title.clone(),
+                        lesson_id: Some(lesson.id.clone()),
+                        lesson_title: Some(lesson.title.clone()),
+                        matched: MatchedField::Lesson,
+                        text,
+                    });
+                }
+            }
+
+            if hits.len() >= MAX_SEARCH_HITS {
+                break;
+            }
+        }
+
+        hits.truncate(MAX_SEARCH_HITS);
+        hits
+    }
+}
+
+fn contains(haystack: &str, needle: &str) -> bool {
+    haystack.to_lowercase().contains(needle)
+}
+
+fn matching_path_text(path: &Path, needle: &str) -> Option<String> {
+    if contains(&path.title, needle) {
+        return Some(path.title.clone());
+    }
+
+    if contains(&path.summary, needle) {
+        return Some(excerpt(&path.summary));
+    }
+
+    if contains(&path.subject, needle) {
+        return Some(path.subject.clone());
+    }
+
+    path.tags.iter().find(|tag| contains(tag, needle)).cloned()
+}
+
+fn matching_lesson_text(lesson: &Lesson, needle: &str) -> Option<String> {
+    if contains(&lesson.title, needle) {
+        return Some(lesson.title.clone());
+    }
+
+    if contains(&lesson.summary, needle) {
+        return Some(excerpt(&lesson.summary));
+    }
+
+    lesson
+        .objectives
+        .iter()
+        .find(|objective| contains(objective, needle))
+        .map(|objective| excerpt(objective))
+}
+
+fn excerpt(text: &str) -> String {
+    if text.chars().count() <= EXCERPT_LENGTH {
+        return text.to_owned();
+    }
+
+    let shortened: String = text.chars().take(EXCERPT_LENGTH).collect();
+
+    format!("{}…", shortened.trim_end())
+}
+
+/// Which part of the catalog a search result was found in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MatchedField {
+    /// The result is a learning path.
+    Path,
+    /// The result is a lesson.
+    Lesson,
+}
+
+/// One search result, already resolved to something the learner can open.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub path_id: String,
+    pub path_title: String,
+    pub lesson_id: Option<String>,
+    pub lesson_title: Option<String>,
+    pub matched: MatchedField,
+    /// The matching text, shortened when it is long.
+    pub text: String,
 }
 
 /// Which learning screen the learner is on.
@@ -78,6 +228,8 @@ impl Catalog {
 pub enum Screen {
     /// The overview of every available path.
     Dashboard,
+    /// The lessons that need another look.
+    Review,
     /// The lesson list of one path.
     Path { path_id: String },
     /// One open lesson.
@@ -97,6 +249,10 @@ pub enum LearningError {
     CheckNotFound,
     /// The submitted option index is not one of the offered options.
     OptionOutOfRange,
+    /// The answer does not match the kind of check it was sent to.
+    AnswerMismatch,
+    /// A short answer was submitted empty.
+    EmptyAnswer,
 }
 
 impl LearningError {
@@ -108,6 +264,18 @@ impl LearningError {
             Self::LessonNotFound => "lesson_not_found",
             Self::CheckNotFound => "check_not_found",
             Self::OptionOutOfRange => "option_out_of_range",
+            Self::AnswerMismatch => "answer_mismatch",
+            Self::EmptyAnswer => "empty_answer",
+        }
+    }
+}
+
+impl From<AnswerProblem> for LearningError {
+    fn from(problem: AnswerProblem) -> Self {
+        match problem {
+            AnswerProblem::KindMismatch => Self::AnswerMismatch,
+            AnswerProblem::OptionOutOfRange => Self::OptionOutOfRange,
+            AnswerProblem::EmptyAnswer => Self::EmptyAnswer,
         }
     }
 }
@@ -126,6 +294,10 @@ impl std::fmt::Display for LearningError {
             Self::LessonNotFound => "the requested lesson does not exist",
             Self::CheckNotFound => "the requested knowledge check does not exist",
             Self::OptionOutOfRange => "the submitted answer is not one of the offered options",
+            Self::AnswerMismatch => {
+                "the submitted answer does not match the kind of knowledge check"
+            }
+            Self::EmptyAnswer => "no answer was entered",
         })
     }
 }
@@ -151,9 +323,12 @@ pub struct PathView {
     pub summary: String,
     pub subject: String,
     pub difficulty: Difficulty,
+    pub tags: Vec<String>,
     pub total_minutes: u32,
     pub completed_lessons: usize,
     pub total_lessons: usize,
+    /// Wrong answers recorded across this path, used for the review hint.
+    pub mistakes: u32,
     pub lessons: Vec<LessonSummaryView>,
 }
 
@@ -166,10 +341,44 @@ pub struct LessonSummaryView {
     pub summary: String,
     pub minutes: Option<u32>,
     pub check_count: usize,
-    pub answered_count: usize,
+    /// Checks answered correctly.
+    pub solved_count: usize,
+    /// Every answer submitted, including wrong ones.
+    pub attempt_count: u32,
+    /// Wrong answers recorded.
+    pub mistakes: u32,
     pub completed: bool,
     /// When the lesson was finished, if it has been.
     pub completed_at: Option<u64>,
+    pub bookmarked: bool,
+}
+
+/// Counts across the whole catalog, derived from stored progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressSummary {
+    pub lessons_completed: usize,
+    pub lessons_total: usize,
+    pub checks_solved: usize,
+    pub checks_total: usize,
+    pub mistakes: u32,
+    pub bookmarks: usize,
+    /// Reading time of the lessons already completed.
+    pub minutes_completed: u32,
+}
+
+/// A lesson that contains a question the learner answered wrongly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewItem {
+    pub path_id: String,
+    pub path_title: String,
+    pub lesson_id: String,
+    pub lesson_title: String,
+    pub mistakes: u32,
+    pub completed: bool,
+    pub bookmarked: bool,
+    pub last_attempt_at: u64,
 }
 
 /// Everything the interface needs to render the learning screens.
@@ -181,8 +390,12 @@ pub struct LearningSnapshot {
     pub paths: Vec<PathView>,
     /// Present only while a lesson is open.
     pub lesson: Option<LessonView>,
-    /// The next unfinished lesson, when there is one.
+    /// The unfinished lesson the learner should continue, when there is one.
     pub resume: Option<ResumePoint>,
+    /// Totals across every path.
+    pub summary: ProgressSummary,
+    /// Lessons containing at least one wrong answer.
+    pub review: Vec<ReviewItem>,
     /// Set when progress could not be saved, so the learner knows.
     pub storage_warning: Option<String>,
 }
@@ -201,8 +414,10 @@ impl LearningSnapshot {
             .map(|path| path_view(path, progress))
             .collect();
 
-        let lesson = open_lesson_view(screen, catalog);
+        let lesson = open_lesson_view(screen, catalog, progress);
         let resume = resume_point(catalog, progress);
+        let summary = progress_summary(catalog, progress);
+        let review = review_items(catalog, progress);
 
         Self {
             can_go_back: !matches!(screen, Screen::Dashboard),
@@ -210,6 +425,8 @@ impl LearningSnapshot {
             paths,
             lesson,
             resume,
+            summary,
+            review,
             storage_warning,
         }
     }
@@ -229,9 +446,12 @@ fn path_view(path: &Path, progress: &ProgressState) -> PathView {
                 summary: lesson.summary.clone(),
                 minutes: lesson.minutes,
                 check_count: lesson.checks.len(),
-                answered_count: record.map_or(0, |record| record.answered_count()),
+                solved_count: record.map_or(0, |record| record.solved_count()),
+                attempt_count: record.map_or(0, |record| record.attempt_count()),
+                mistakes: record.map_or(0, |record| record.mistakes()),
                 completed: progress.is_complete(&key),
-                completed_at: record.and_then(crate::progress::LessonRecord::completed_at),
+                completed_at: record.and_then(|record| record.completed_at()),
+                bookmarked: progress.is_bookmarked(&key),
             }
         })
         .collect();
@@ -242,37 +462,140 @@ fn path_view(path: &Path, progress: &ProgressState) -> PathView {
         summary: path.summary.clone(),
         subject: path.subject.clone(),
         difficulty: path.difficulty,
+        tags: path.tags.clone(),
         total_minutes: path.total_minutes(),
         completed_lessons: lessons.iter().filter(|lesson| lesson.completed).count(),
         total_lessons: lessons.len(),
+        mistakes: lessons.iter().map(|lesson| lesson.mistakes).sum(),
         lessons,
     }
 }
 
-fn open_lesson_view(screen: &Screen, catalog: &Catalog) -> Option<LessonView> {
+fn open_lesson_view(
+    screen: &Screen,
+    catalog: &Catalog,
+    progress: &ProgressState,
+) -> Option<LessonView> {
     match screen {
-        Screen::Lesson { path_id, lesson_id } => catalog
-            .lesson(path_id, lesson_id)
-            .map(lessons::Lesson::view),
+        Screen::Lesson { path_id, lesson_id } => {
+            let lesson = catalog.lesson(path_id, lesson_id)?;
+            let record = progress.lesson(&LessonKey::new(path_id, lesson_id));
+
+            Some(lesson.view(record))
+        }
         _ => None,
     }
 }
-
+/// Finds the lesson to continue: the one the learner opened most recently, or
+/// the first unfinished lesson in content order when none has been opened.
 fn resume_point(catalog: &Catalog, progress: &ProgressState) -> Option<ResumePoint> {
+    last_opened_point(catalog, progress).or_else(|| first_unfinished_point(catalog, progress))
+}
+
+fn last_opened_point(catalog: &Catalog, progress: &ProgressState) -> Option<ResumePoint> {
+    let key = progress.last_opened()?;
+
+    if progress.is_complete(key) {
+        return None;
+    }
+
+    let path = catalog.path(key.path_id())?;
+    let lesson = path.lesson(key.lesson_id())?;
+
+    Some(resume_point_for(path, lesson))
+}
+
+fn first_unfinished_point(catalog: &Catalog, progress: &ProgressState) -> Option<ResumePoint> {
     for path in catalog.paths() {
         for lesson in &path.lessons {
             if !progress.is_complete(&LessonKey::new(&path.id, &lesson.id)) {
-                return Some(ResumePoint {
-                    path_id: path.id.clone(),
-                    path_title: path.title.clone(),
-                    lesson_id: lesson.id.clone(),
-                    lesson_title: lesson.title.clone(),
-                });
+                return Some(resume_point_for(path, lesson));
             }
         }
     }
 
     None
+}
+
+fn resume_point_for(path: &Path, lesson: &Lesson) -> ResumePoint {
+    ResumePoint {
+        path_id: path.id.clone(),
+        path_title: path.title.clone(),
+        lesson_id: lesson.id.clone(),
+        lesson_title: lesson.title.clone(),
+    }
+}
+
+fn progress_summary(catalog: &Catalog, progress: &ProgressState) -> ProgressSummary {
+    let mut summary = ProgressSummary {
+        lessons_completed: 0,
+        lessons_total: 0,
+        checks_solved: 0,
+        checks_total: 0,
+        mistakes: 0,
+        bookmarks: progress.bookmark_count(),
+        minutes_completed: 0,
+    };
+
+    for path in catalog.paths() {
+        for lesson in &path.lessons {
+            let key = LessonKey::new(&path.id, &lesson.id);
+            let record = progress.lesson(&key);
+
+            summary.lessons_total += 1;
+            summary.checks_total += lesson.checks.len();
+            summary.checks_solved += record.map_or(0, |record| record.solved_count());
+            summary.mistakes += record.map_or(0, |record| record.mistakes());
+
+            if progress.is_complete(&key) {
+                summary.lessons_completed += 1;
+                summary.minutes_completed += lesson.minutes.unwrap_or(0);
+            }
+        }
+    }
+
+    summary
+}
+
+fn review_items(catalog: &Catalog, progress: &ProgressState) -> Vec<ReviewItem> {
+    let mut items = Vec::new();
+
+    for path in catalog.paths() {
+        for lesson in &path.lessons {
+            let key = LessonKey::new(&path.id, &lesson.id);
+
+            let Some(record) = progress.lesson(&key) else {
+                continue;
+            };
+
+            if record.mistakes() == 0 {
+                continue;
+            }
+
+            items.push(ReviewItem {
+                path_id: path.id.clone(),
+                path_title: path.title.clone(),
+                lesson_id: lesson.id.clone(),
+                lesson_title: lesson.title.clone(),
+                mistakes: record.mistakes(),
+                completed: record.completed_at().is_some(),
+                bookmarked: progress.is_bookmarked(&key),
+                last_attempt_at: record.last_attempt_at(),
+            });
+        }
+    }
+
+    // Most mistakes first, then the most recent, so the queue stays useful as
+    // it grows.
+    items.sort_by(|left, right| {
+        right
+            .mistakes
+            .cmp(&left.mistakes)
+            .then(right.last_attempt_at.cmp(&left.last_attempt_at))
+            .then_with(|| left.lesson_title.cmp(&right.lesson_title))
+    });
+
+    items
 }
 
 /// The judgement made about a submitted answer.
@@ -286,27 +609,23 @@ pub struct EvaluatedAnswer {
 
 /// Checks a submitted answer against the content.
 ///
-/// This is the only place an answer index is compared, so the correct option
-/// never has to leave the backend.
+/// This is the only place an answer is compared, so the correct option never
+/// has to leave the backend.
 pub fn evaluate_answer(
     catalog: &Catalog,
     path_id: &str,
     lesson_id: &str,
     check_id: &str,
-    option: usize,
+    submitted: &SubmittedAnswer,
 ) -> Result<EvaluatedAnswer, LearningError> {
     let lesson = catalog
         .lesson(path_id, lesson_id)
         .ok_or(LearningError::LessonNotFound)?;
     let check = lesson.check(check_id).ok_or(LearningError::CheckNotFound)?;
 
-    if option >= check.options.len() {
-        return Err(LearningError::OptionOutOfRange);
-    }
-
     Ok(EvaluatedAnswer {
-        correct: check.is_correct(option),
-        explanation: check.explanation.clone(),
+        correct: check.grade(submitted)?,
+        explanation: check.explanation().to_owned(),
         required_checks: lesson.check_ids(),
     })
 }
@@ -339,6 +658,11 @@ impl LearningSession {
     /// Returns to the dashboard.
     pub fn show_dashboard(&mut self) {
         self.screen = Screen::Dashboard;
+    }
+
+    /// Shows the lessons that need another look.
+    pub fn show_review(&mut self) {
+        self.screen = Screen::Review;
     }
 
     /// Opens a path after confirming that it exists.
@@ -377,12 +701,12 @@ impl LearningSession {
         Ok(())
     }
 
-    /// Steps back one screen: a lesson returns to its path, a path to the
-    /// dashboard. The dashboard stays put.
+    /// Steps back one screen: a lesson returns to its path, a path or the
+    /// review list to the dashboard. The dashboard stays put.
     pub fn go_back(&mut self) {
         self.screen = match &self.screen {
             Screen::Dashboard => Screen::Dashboard,
-            Screen::Path { .. } => Screen::Dashboard,
+            Screen::Review | Screen::Path { .. } => Screen::Dashboard,
             Screen::Lesson { path_id, .. } => Screen::Path {
                 path_id: path_id.clone(),
             },
@@ -390,11 +714,56 @@ impl LearningSession {
     }
 }
 
+/// The answer that satisfies a check, for tests that need to submit one.
+#[cfg(test)]
+pub(crate) fn correct_answer(check: &Check) -> SubmittedAnswer {
+    match check {
+        Check::Choice { .. } => SubmittedAnswer::Choice {
+            option: check
+                .answer_index()
+                .expect("choice checks declare an answer index"),
+        },
+        Check::TrueFalse { .. } => SubmittedAnswer::TrueFalse {
+            value: check
+                .correct_bool()
+                .expect("true/false checks declare an answer"),
+        },
+        Check::ShortAnswer { .. } => SubmittedAnswer::ShortAnswer {
+            text: check
+                .accepted_answers()
+                .first()
+                .expect("short-answer checks declare an accepted wording")
+                .clone(),
+        },
+    }
+}
+
+/// An answer that no check accepts, for tests that need a wrong one.
+#[cfg(test)]
+pub(crate) fn wrong_answer(check: &Check) -> SubmittedAnswer {
+    match check {
+        Check::Choice { .. } => SubmittedAnswer::Choice {
+            option: (check
+                .answer_index()
+                .expect("choice checks declare an answer index")
+                + 1)
+                % check.options().len(),
+        },
+        Check::TrueFalse { .. } => SubmittedAnswer::TrueFalse {
+            value: !check
+                .correct_bool()
+                .expect("true/false checks declare an answer"),
+        },
+        Check::ShortAnswer { .. } => SubmittedAnswer::ShortAnswer {
+            text: String::from("a wrong answer"),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lessons::{CheckView, Section};
-    use crate::progress::AnswerEffect;
+    use crate::lessons::Section;
 
     fn catalog() -> &'static Catalog {
         Catalog::embedded().expect("the bundled content should be valid")
@@ -408,9 +777,63 @@ mod tests {
         catalog().paths()[0].lessons[0].id.clone()
     }
 
+    fn complete_lesson(
+        catalog: &Catalog,
+        progress: &mut ProgressState,
+        path_id: &str,
+        lesson_id: &str,
+    ) {
+        let lesson = catalog.lesson(path_id, lesson_id).expect("lesson exists");
+        let key = LessonKey::new(path_id, lesson_id);
+
+        for check in &lesson.checks {
+            progress.record_attempt(&key, check.id(), true, &lesson.check_ids(), 10);
+        }
+    }
+
     #[test]
     fn bundled_content_loads() {
-        assert!(!catalog().paths().is_empty());
+        assert!(catalog().paths().len() >= 2);
+    }
+
+    #[test]
+    fn every_pack_contributes_distinct_paths_and_lessons() {
+        let mut path_ids: Vec<&str> = Vec::new();
+
+        for path in catalog().paths() {
+            assert!(
+                !path_ids.contains(&path.id.as_str()),
+                "duplicate {}",
+                path.id
+            );
+            path_ids.push(&path.id);
+
+            let mut lesson_ids: Vec<&str> = Vec::new();
+
+            for lesson in &path.lessons {
+                assert!(
+                    !lesson_ids.contains(&lesson.id.as_str()),
+                    "duplicate {} in {}",
+                    lesson.id,
+                    path.id
+                );
+                lesson_ids.push(&lesson.id);
+            }
+        }
+    }
+
+    #[test]
+    fn the_catalog_covers_more_than_one_subject() {
+        let subjects: Vec<&str> = catalog()
+            .paths()
+            .iter()
+            .map(|path| path.subject.as_str())
+            .collect();
+        let mut unique = subjects.clone();
+        unique.sort();
+        unique.dedup();
+
+        assert!(unique.len() >= 2, "got {subjects:?}");
     }
 
     #[test]
@@ -478,6 +901,17 @@ mod tests {
     }
 
     #[test]
+    fn the_review_screen_is_reachable_and_steps_back_to_the_dashboard() {
+        let mut session = LearningSession::new();
+
+        session.show_review();
+        assert_eq!(session.screen(), &Screen::Review);
+
+        session.go_back();
+        assert_eq!(session.screen(), &Screen::Dashboard);
+    }
+
+    #[test]
     fn going_back_walks_lesson_to_path_to_dashboard() {
         let mut session = LearningSession::new();
         let path_id = first_path_id();
@@ -506,8 +940,14 @@ mod tests {
             .expect("the lesson exists");
         let check = &lesson.checks[0];
 
-        let evaluated = evaluate_answer(catalog(), &path_id, &lesson_id, &check.id, check.answer())
-            .expect("the answer is offered");
+        let evaluated = evaluate_answer(
+            catalog(),
+            &path_id,
+            &lesson_id,
+            check.id(),
+            &correct_answer(check),
+        )
+        .expect("the answer is well formed");
 
         assert!(evaluated.correct);
         assert_eq!(evaluated.required_checks.len(), lesson.checks.len());
@@ -522,29 +962,136 @@ mod tests {
             .lesson(&path_id, &lesson_id)
             .expect("the lesson exists");
         let check = &lesson.checks[0];
-        let wrong = (check.answer() + 1) % check.options.len();
 
-        let evaluated = evaluate_answer(catalog(), &path_id, &lesson_id, &check.id, wrong)
-            .expect("the answer is offered");
+        let evaluated = evaluate_answer(
+            catalog(),
+            &path_id,
+            &lesson_id,
+            check.id(),
+            &wrong_answer(check),
+        )
+        .expect("the answer is well formed");
 
         assert!(!evaluated.correct);
+    }
+
+    #[test]
+    fn every_check_kind_can_be_answered_correctly() {
+        let mut seen = std::collections::BTreeSet::new();
+
+        for path in catalog().paths() {
+            for lesson in &path.lessons {
+                for check in &lesson.checks {
+                    let evaluated = evaluate_answer(
+                        catalog(),
+                        &path.id,
+                        &lesson.id,
+                        check.id(),
+                        &correct_answer(check),
+                    )
+                    .expect("the answer is well formed");
+
+                    assert!(
+                        evaluated.correct,
+                        "{} in {} was graded wrong with its own answer",
+                        check.id(),
+                        lesson.id
+                    );
+                    seen.insert(format!("{:?}", check.kind()));
+                }
+            }
+        }
+
+        assert_eq!(
+            seen,
+            ["Choice", "ShortAnswer", "TrueFalse"]
+                .iter()
+                .map(|kind| kind.to_string())
+                .collect(),
+            "the bundled content should use every exercise kind"
+        );
     }
 
     #[test]
     fn an_option_outside_the_offered_range_is_rejected() {
         let path_id = first_path_id();
         let lesson_id = first_lesson_id();
-        let check_id = catalog()
+        let lesson = catalog()
             .lesson(&path_id, &lesson_id)
-            .expect("the lesson exists")
-            .checks[0]
-            .id
-            .clone();
+            .expect("the lesson exists");
+        let choice = lesson
+            .checks
+            .iter()
+            .find(|check| matches!(check, Check::Choice { .. }))
+            .expect("the first lesson has a choice check");
 
         assert_eq!(
-            evaluate_answer(catalog(), &path_id, &lesson_id, &check_id, 99),
+            evaluate_answer(
+                catalog(),
+                &path_id,
+                &lesson_id,
+                choice.id(),
+                &SubmittedAnswer::Choice { option: 99 }
+            ),
             Err(LearningError::OptionOutOfRange)
         );
+    }
+
+    #[test]
+    fn an_answer_of_the_wrong_kind_is_rejected() {
+        let path_id = first_path_id();
+        let lesson_id = first_lesson_id();
+        let lesson = catalog()
+            .lesson(&path_id, &lesson_id)
+            .expect("the lesson exists");
+        let choice = lesson
+            .checks
+            .iter()
+            .find(|check| matches!(check, Check::Choice { .. }))
+            .expect("the first lesson has a choice check");
+
+        assert_eq!(
+            evaluate_answer(
+                catalog(),
+                &path_id,
+                &lesson_id,
+                choice.id(),
+                &SubmittedAnswer::ShortAnswer {
+                    text: String::from("main")
+                }
+            ),
+            Err(LearningError::AnswerMismatch)
+        );
+    }
+
+    #[test]
+    fn an_empty_short_answer_is_rejected() {
+        let mut found = false;
+
+        for path in catalog().paths() {
+            for lesson in &path.lessons {
+                for check in &lesson.checks {
+                    if let Check::ShortAnswer { .. } = check {
+                        found = true;
+
+                        assert_eq!(
+                            evaluate_answer(
+                                catalog(),
+                                &path.id,
+                                &lesson.id,
+                                check.id(),
+                                &SubmittedAnswer::ShortAnswer {
+                                    text: String::from("   ")
+                                }
+                            ),
+                            Err(LearningError::EmptyAnswer)
+                        );
+                    }
+                }
+            }
+        }
+
+        assert!(found, "the bundled content should contain a short answer");
     }
 
     #[test]
@@ -555,7 +1102,7 @@ mod tests {
                 &first_path_id(),
                 &first_lesson_id(),
                 "does-not-exist",
-                0
+                &SubmittedAnswer::Choice { option: 0 }
             ),
             Err(LearningError::CheckNotFound)
         );
@@ -569,6 +1116,9 @@ mod tests {
         assert_eq!(snapshot.paths.len(), catalog().paths().len());
         assert!(snapshot.lesson.is_none());
         assert!(!snapshot.can_go_back);
+        assert_eq!(snapshot.summary.lessons_completed, 0);
+        assert!(snapshot.summary.checks_total > 0);
+        assert!(snapshot.review.is_empty());
 
         let first = &snapshot.paths[0];
         assert_eq!(first.completed_lessons, 0);
@@ -579,13 +1129,10 @@ mod tests {
     #[test]
     fn finishing_every_lesson_clears_the_resume_point() {
         let mut progress = ProgressState::new();
-        let path = &catalog().paths()[0];
 
-        for lesson in &path.lessons {
-            let key = LessonKey::new(&path.id, &lesson.id);
-
-            for check in &lesson.checks {
-                progress.record_correct(&key, &check.id, &lesson.check_ids(), 1);
+        for path in catalog().paths() {
+            for lesson in &path.lessons {
+                complete_lesson(catalog(), &mut progress, &path.id, &lesson.id);
             }
         }
 
@@ -593,8 +1140,12 @@ mod tests {
 
         assert!(snapshot.resume.is_none());
         assert_eq!(
-            snapshot.paths[0].completed_lessons,
-            snapshot.paths[0].total_lessons
+            snapshot.summary.lessons_completed,
+            snapshot.summary.lessons_total
+        );
+        assert_eq!(
+            snapshot.summary.checks_solved,
+            snapshot.summary.checks_total
         );
     }
 
@@ -610,16 +1161,49 @@ mod tests {
     }
 
     #[test]
-    fn the_resume_point_skips_finished_lessons() {
-        let path = &catalog().paths()[0];
-        let key = LessonKey::new(&path.id, &path.lessons[0].id);
+    fn the_resume_point_follows_the_most_recently_opened_lesson() {
+        let catalog = catalog();
+        let path = &catalog.paths()[0];
+        let later = &path.lessons[2];
         let mut progress = ProgressState::new();
 
-        for check in &path.lessons[0].checks {
-            progress.record_correct(&key, &check.id, &path.lessons[0].check_ids(), 1);
-        }
+        progress.mark_opened(&LessonKey::new(&path.id, &path.lessons[0].id));
+        progress.mark_opened(&LessonKey::new(&path.id, &later.id));
 
-        let snapshot = LearningSnapshot::build(&Screen::Dashboard, catalog(), &progress, None);
+        let snapshot = LearningSnapshot::build(&Screen::Dashboard, catalog, &progress, None);
+
+        assert_eq!(
+            snapshot.resume.expect("still unfinished").lesson_id,
+            later.id
+        );
+    }
+
+    #[test]
+    fn the_resume_point_ignores_a_finished_lesson_that_was_opened_last() {
+        let catalog = catalog();
+        let path = &catalog.paths()[0];
+        let mut progress = ProgressState::new();
+
+        complete_lesson(catalog, &mut progress, &path.id, &path.lessons[0].id);
+        progress.mark_opened(&LessonKey::new(&path.id, &path.lessons[0].id));
+
+        let snapshot = LearningSnapshot::build(&Screen::Dashboard, catalog, &progress, None);
+
+        assert_eq!(
+            snapshot.resume.expect("the next lesson").lesson_id,
+            path.lessons[1].id
+        );
+    }
+
+    #[test]
+    fn the_resume_point_skips_finished_lessons() {
+        let catalog = catalog();
+        let path = &catalog.paths()[0];
+        let mut progress = ProgressState::new();
+
+        complete_lesson(catalog, &mut progress, &path.id, &path.lessons[0].id);
+
+        let snapshot = LearningSnapshot::build(&Screen::Dashboard, catalog, &progress, None);
 
         assert_eq!(
             snapshot.resume.expect("still unfinished").lesson_id,
@@ -643,27 +1227,83 @@ mod tests {
 
         assert!(!lesson.sections.is_empty());
         assert!(!lesson.checks.is_empty());
+        assert!(!lesson.objectives.is_empty());
         assert!(snapshot.can_go_back);
+    }
+
+    #[test]
+    fn a_wrong_answer_creates_a_review_item_without_completing_the_lesson() {
+        let path = &catalog().paths()[0];
+        let lesson = &path.lessons[0];
+        let key = LessonKey::new(&path.id, &lesson.id);
+        let mut progress = ProgressState::new();
+
+        progress.record_attempt(&key, lesson.checks[0].id(), false, &lesson.check_ids(), 77);
+
+        let snapshot = LearningSnapshot::build(&Screen::Dashboard, catalog(), &progress, None);
+
+        assert_eq!(snapshot.review.len(), 1);
+        assert_eq!(snapshot.review[0].lesson_id, lesson.id);
+        assert_eq!(snapshot.review[0].mistakes, 1);
+        assert!(!snapshot.review[0].completed);
+        assert!(!snapshot.paths[0].lessons[0].completed);
+        assert_eq!(snapshot.paths[0].lessons[0].attempt_count, 1);
+    }
+
+    #[test]
+    fn a_completed_lesson_with_mistakes_stays_in_the_review_queue() {
+        let path = &catalog().paths()[0];
+        let lesson = &path.lessons[0];
+        let key = LessonKey::new(&path.id, &lesson.id);
+        let mut progress = ProgressState::new();
+
+        progress.record_attempt(&key, lesson.checks[0].id(), false, &lesson.check_ids(), 1);
+        complete_lesson(catalog(), &mut progress, &path.id, &lesson.id);
+
+        let snapshot = LearningSnapshot::build(&Screen::Review, catalog(), &progress, None);
+
+        assert_eq!(snapshot.review.len(), 1);
+        assert!(snapshot.review[0].completed);
+        assert_eq!(snapshot.review[0].mistakes, 1);
+        assert!(snapshot.can_go_back);
+        assert_eq!(snapshot.summary.mistakes, 1);
+    }
+
+    #[test]
+    fn bookmarks_appear_in_the_snapshot_and_the_summary() {
+        let path = &catalog().paths()[0];
+        let lesson = &path.lessons[0];
+        let key = LessonKey::new(&path.id, &lesson.id);
+        let mut progress = ProgressState::new();
+
+        progress.toggle_bookmark(&key);
+
+        let snapshot = LearningSnapshot::build(&Screen::Dashboard, catalog(), &progress, None);
+
+        assert!(snapshot.paths[0].lessons[0].bookmarked);
+        assert_eq!(snapshot.summary.bookmarks, 1);
     }
 
     #[test]
     fn completing_a_lesson_is_reflected_in_the_snapshot() {
         let path = &catalog().paths()[0];
         let lesson = &path.lessons[0];
-        let key = LessonKey::new(&path.id, &lesson.id);
         let mut progress = ProgressState::new();
 
-        let mut effect = AnswerEffect::Recorded;
-        for check in &lesson.checks {
-            effect = progress.record_correct(&key, &check.id, &lesson.check_ids(), 42);
-        }
-
-        assert_eq!(effect, AnswerEffect::LessonCompleted);
+        complete_lesson(catalog(), &mut progress, &path.id, &lesson.id);
 
         let snapshot = LearningSnapshot::build(&Screen::Dashboard, catalog(), &progress, None);
 
         assert_eq!(snapshot.paths[0].completed_lessons, 1);
         assert!(snapshot.paths[0].lessons[0].completed);
+        assert_eq!(
+            snapshot.paths[0].lessons[0].solved_count,
+            lesson.checks.len()
+        );
+        assert_eq!(
+            snapshot.summary.minutes_completed,
+            lesson.minutes.unwrap_or(0)
+        );
     }
 
     #[test]
@@ -679,12 +1319,64 @@ mod tests {
     }
 
     #[test]
+    fn search_finds_paths_and_lessons_and_ignores_case() {
+        let catalog = catalog();
+        let by_path_title = catalog.search("RUST FOUNDATIONS");
+
+        assert!(
+            by_path_title
+                .iter()
+                .any(|hit| hit.matched == MatchedField::Path),
+            "got {by_path_title:?}"
+        );
+
+        let by_objective = catalog.search("ownership");
+
+        assert!(
+            by_objective
+                .iter()
+                .any(|hit| hit.matched == MatchedField::Lesson && hit.lesson_id.is_some()),
+            "got {by_objective:?}"
+        );
+    }
+
+    #[test]
+    fn search_with_no_query_returns_nothing() {
+        assert!(catalog().search("   ").is_empty());
+        assert!(catalog().search("zzzz-no-such-text").is_empty());
+    }
+
+    #[test]
+    fn search_results_point_at_openable_content() {
+        let catalog = catalog();
+
+        for hit in catalog.search("the") {
+            assert!(
+                catalog.path(&hit.path_id).is_some(),
+                "unknown path in {hit:?}"
+            );
+
+            if let Some(lesson_id) = &hit.lesson_id {
+                assert!(
+                    catalog.lesson(&hit.path_id, lesson_id).is_some(),
+                    "unknown lesson in {hit:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn check_views_expose_options_but_not_the_answer() {
         let lesson = &catalog().paths()[0].lessons[0];
-        let view: &CheckView = &lesson.view().checks[0];
+        let view = lesson.view(None);
+        let choice = view
+            .checks
+            .iter()
+            .find(|check| check.kind == crate::lessons::CheckKind::Choice)
+            .expect("the first lesson has a choice check");
 
-        assert_eq!(view.options.len(), lesson.checks[0].options.len());
-        assert!(!view.prompt.is_empty());
+        assert!(choice.options.len() >= 2);
+        assert!(!choice.prompt.is_empty());
     }
 
     #[test]
@@ -703,6 +1395,10 @@ mod tests {
             lesson,
             r#"{"kind":"lesson","pathId":"path","lessonId":"lesson"}"#
         );
+
+        let review = serde_json::to_string(&Screen::Review).expect("review");
+
+        assert_eq!(review, r#"{"kind":"review"}"#);
     }
 
     #[test]
@@ -717,23 +1413,58 @@ mod tests {
             "\"lesson\"",
             "\"resume\"",
             "\"storageWarning\"",
+            "\"summary\"",
+            "\"review\"",
+            "\"lessonsCompleted\"",
+            "\"checksSolved\"",
+            "\"minutesCompleted\"",
         ] {
-            assert!(json.contains(key), "missing {key} in {json}");
+            assert!(json.contains(key), "missing {key}");
         }
 
-        assert!(json.contains("\"completedLessons\""));
-        assert!(json.contains("\"answeredCount\""));
+        assert!(json.contains("\"solvedCount\""));
+        assert!(json.contains("\"attemptCount\""));
         assert!(json.contains("\"completedAt\""));
+        assert!(json.contains("\"bookmarked\""));
     }
 
     #[test]
     fn sections_are_passed_through_unchanged() {
         let lesson: &Lesson = &catalog().paths()[0].lessons[0];
-        let view = lesson.view();
+        let view = lesson.view(None);
 
         assert!(view.sections.iter().all(|section| matches!(
             section,
-            Section::Explanation { .. } | Section::Code { .. } | Section::Note { .. }
+            Section::Explanation { .. }
+                | Section::Code { .. }
+                | Section::Note { .. }
+                | Section::Steps { .. }
+                | Section::Table { .. }
+                | Section::Mistake { .. }
         )));
+    }
+
+    #[test]
+    fn all_section_kinds_are_used_by_the_bundled_content() {
+        let mut kinds = std::collections::BTreeSet::new();
+
+        for path in catalog().paths() {
+            for lesson in &path.lessons {
+                for section in &lesson.sections {
+                    kinds.insert(match section {
+                        Section::Explanation { .. } => "explanation",
+                        Section::Code { .. } => "code",
+                        Section::Note { .. } => "note",
+                        Section::Steps { .. } => "steps",
+                        Section::Table { .. } => "table",
+                        Section::Mistake { .. } => "mistake",
+                    });
+                }
+            }
+        }
+
+        for kind in ["explanation", "code", "steps", "table", "mistake"] {
+            assert!(kinds.contains(kind), "the content never uses {kind}");
+        }
     }
 }
