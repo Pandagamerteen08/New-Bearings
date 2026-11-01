@@ -71,7 +71,7 @@ Status labels used below mean:
 | Bookmarks | Verified | Per-lesson; survive restart; counted on the dashboard. |
 | Search | Verified | Rust-side search over path titles, summaries, subjects and tags, and lesson titles, summaries and objectives. |
 | Data recovery | Implemented | Unreadable files are moved aside as `app-state.recovered-<timestamp>.json` and reported. Tested in Rust. |
-| Reduced motion, focus, live regions | Verified | `prefers-reduced-motion` honoured; visible focus rings; results announced with `role="status"`. |
+| Reduced motion, focus, live regions | Implemented | Semantic controls, visible focus styles, `role="status"`/`role="alert"` and a `prefers-reduced-motion` block are in place and were inspected in the rendered page, but no keyboard-only or screen-reader walkthrough was performed in this session. |
 | Standalone executable | Verified | `tauri build --no-bundle` embeds the interface; the release binary renders without Vite. A plain `cargo build` does **not**, because it still loads the development URL. |
 | Linux and macOS | Implemented | Both compile and pass tests in CI; the interface has not been run on them here. |
 | Accounts, sync, cloud | Planned | Not implemented, and not required to use the application. |
