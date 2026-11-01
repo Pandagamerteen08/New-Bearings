@@ -48,7 +48,21 @@ jobs:
         run: cargo fmt --check
 
       - name: Check compilation
-        run: cargo check --all-targets
+        shell: bash
+        run: |
+          set -o pipefail
+
+          if cargo check --all-targets 2>&1 | tee cargo-check.log; then
+            exit 0
+          fi
+
+          # Surface a few real compiler errors as annotations, so a failure on a
+          # platform nobody develops on can be understood from the run summary.
+          grep -A2 -m 3 -E "^error(\[|:)" cargo-check.log | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
+          exit 1
 
       - name: Run tests
         run: cargo test
