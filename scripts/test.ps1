@@ -9,7 +9,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Checking compilation..." -ForegroundColor Cyan
-cargo check
+cargo check --all-targets
 if ($LASTEXITCODE -ne 0) {
     throw "Cargo check failed."
 }
@@ -20,4 +20,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "Tests failed."
 }
 
-Write-Host "All available checks passed." -ForegroundColor Green
+Write-Host "Running Clippy..." -ForegroundColor Cyan
+cargo clippy --all-targets -- -D warnings
+if ($LASTEXITCODE -ne 0) {
+    throw "Clippy reported problems."
+}
+
+Write-Host "Type-checking and building the frontend..." -ForegroundColor Cyan
+npm --prefix frontend run build
+if ($LASTEXITCODE -ne 0) {
+    throw "The frontend build failed."
+}
+
+Write-Host "All checks passed." -ForegroundColor Green

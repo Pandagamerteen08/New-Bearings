@@ -1,7 +1,12 @@
-# Unit Tests
+# Unit tests
 
-Place focused tests for individual functions and modules here.
+The unit tests live beside the code they test, in `#[cfg(test)]` modules inside
+each Rust module under `src/`. Run them with `cargo test`.
 
-Prefer testing business logic independently from the GUI and external services.
+That keeps a test next to the rule it protects: content validation in
+`src/lessons/lessons.rs`, the completion rule in `src/progress/progress.rs`,
+migration and recovery in `src/storage/storage.rs`, and the command surface in
+`src/app/session.rs`.
 
-The scaffold currently has no implemented application logic to test.
+This directory is reserved for fixture-based tests that need their own files
+rather than inline values. It is empty today.
