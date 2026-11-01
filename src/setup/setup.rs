@@ -93,9 +93,7 @@ pub enum SetupError {
 impl std::fmt::Display for SetupError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AlreadyStarted => {
-                formatter.write_str("The initial setup has already started.")
-            }
+            Self::AlreadyStarted => formatter.write_str("The initial setup has already started."),
             Self::AlreadyAtWelcome => {
                 formatter.write_str("The initial setup is already at the welcome screen.")
             }
@@ -273,8 +271,8 @@ mod tests {
 
     #[test]
     fn setup_error_serializes_to_a_lowercase_code() {
-        let json = serde_json::to_string(&SetupError::AlreadyStarted)
-            .expect("error should serialize");
+        let json =
+            serde_json::to_string(&SetupError::AlreadyStarted).expect("error should serialize");
 
         assert_eq!(json, r#""already_started""#);
     }
